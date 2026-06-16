@@ -99,13 +99,14 @@ func (d Deviation) ExpiryTime() (time.Time, error) {
 }
 
 type Surface struct {
-	URL              string `yaml:"url"`
-	Kind             string `yaml:"kind"` // client-tool | docs | site
-	GeneratesFiles   bool   `yaml:"generates_files"`
-	ThreadedWASM     bool   `yaml:"threaded_wasm"`
-	HasServiceWorker bool   `yaml:"has_service_worker"`
-	Stateless        bool   `yaml:"stateless"`
-	PrivacySurface   bool   `yaml:"privacy_surface"`
+	URL              string   `yaml:"url"`
+	Paths            []string `yaml:"paths"` // extra same-origin paths to sample; static checks run worst-case across URL + paths
+	Kind             string   `yaml:"kind"`  // client-tool | docs | site
+	GeneratesFiles   bool     `yaml:"generates_files"`
+	ThreadedWASM     bool     `yaml:"threaded_wasm"`
+	HasServiceWorker bool     `yaml:"has_service_worker"`
+	Stateless        bool     `yaml:"stateless"`
+	PrivacySurface   bool     `yaml:"privacy_surface"`
 }
 
 // IsPrivacy reports whether referrer leakage matters for this surface. Client

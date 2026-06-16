@@ -27,6 +27,13 @@ func newDoc(status int, body string, header map[string]string) *httpx.Doc {
 	return &httpx.Doc{Status: status, Header: h, Body: []byte(body)}
 }
 
+// docFinal builds a fixture whose FinalURL is set (needed by same-origin checks).
+func docFinal(finalURL, body string) *httpx.Doc {
+	d := newDoc(200, body, nil)
+	d.RequestURL, d.FinalURL = finalURL, finalURL
+	return d
+}
+
 // dnsTestServer starts a loopback UDP DNS server with the given handler and
 // returns its address for use as CheckCtx.Resolver.
 func dnsTestServer(t *testing.T, handler dns.HandlerFunc) string {

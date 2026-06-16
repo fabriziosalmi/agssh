@@ -1,11 +1,40 @@
 package rules
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/fabriziosalmi/agssh/internal/manifest"
 	"github.com/miekg/dns"
 )
+
+func TestChkPinnedDeps(t *testing.T) {
+	write := func(name, content string) string {
+		d := t.TempDir()
+		if err := os.WriteFile(filepath.Join(d, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return d
+	}
+	cases := []struct {
+		name string
+		dir  string
+		want Status
+	}{
+		{"npm with integrity", write("package-lock.json", `{"packages":{"node_modules/x":{"integrity":"sha512-aa"}}}`), Pass},
+		{"npm without integrity", write("package-lock.json", `{"packages":{"node_modules/x":{"version":"1"}}}`), Fail},
+		{"go.sum presence suffices", write("go.sum", "example.com/x v1.0.0 h1:aa=\n"), Pass},
+		{"no lockfile", t.TempDir(), Inconclusive},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if out := chkPinnedDeps(t.Context(), &CheckCtx{RepoDir: tc.dir}); out.Status != tc.want {
+				t.Errorf("got %s, want %s", out.Status, tc.want)
+			}
+		})
+	}
+}
 
 func TestParseOSVResults(t *testing.T) {
 	oneVuln := `{"results":[{"packages":[{"vulnerabilities":[{"id":"GHSA-xxxx"},{"id":"GHSA-xxxx"},{"id":"CVE-2026-1"}]}]}]}`

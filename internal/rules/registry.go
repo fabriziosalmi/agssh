@@ -45,7 +45,7 @@ func All() []Rule {
 
 		// ---- §6 AG-SUP — Supply Chain ----
 		{"AG-SUP-01", "SRI on any unavoidable cross-origin subresource", "AG-SUP", Must, High, S, PlaneStatic, always, chkSRI},
-		{"AG-SUP-02", "Pin dependencies by integrity hash", "AG-SUP", Must, High, S, PlaneSupply, always, todo("lockfile integrity-hash audit per ecosystem")},
+		{"AG-SUP-02", "Pin dependencies by integrity hash", "AG-SUP", Must, High, S, PlaneSupply, always, chkPinnedDeps},
 		{"AG-SUP-03", "Reproducible build; pinned toolchain", "AG-SUP", Should, Medium, S, PlaneSupply, always, todo("rebuild and compare artifact digests")},
 		{"AG-SUP-04", "No secrets in shipped output", "AG-SUP", Must, High, B, PlaneSupply, always, chkNoSecrets},
 		{"AG-SUP-05", "No unintended source maps", "AG-SUP", Should, Low, S, PlaneSupply, always, chkNoSourceMaps},

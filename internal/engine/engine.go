@@ -5,7 +5,9 @@ package engine
 
 import (
 	"context"
+	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/fabriziosalmi/agssh/internal/httpx"
@@ -39,14 +41,16 @@ func Evaluate(cfg *manifest.Config, surface manifest.Surface, opts Options) *rep
 		opts.PerCheck = 45 * time.Second
 	}
 
-	// Fetch the live surface once; static checks read this document.
-	var doc *httpx.Doc
+	// Fetch the live surface (and any extra declared paths). Static checks read
+	// the root document by default; for multi-path surfaces they are evaluated
+	// worst-case across every sampled document (a weaker per-path header loses).
+	var docs []*httpx.Doc
 	if opts.HTTP != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), opts.PerCheck)
-		if d, err := opts.HTTP.Fetch(ctx, surface.URL); err == nil {
-			doc = d
-		}
-		cancel()
+		docs = fetchDocs(opts.HTTP, surface.URL, surface.Paths, opts.PerCheck)
+	}
+	var rootDoc *httpx.Doc
+	if len(docs) > 0 {
+		rootDoc = docs[0]
 	}
 
 	resolver := opts.Resolver
@@ -57,7 +61,7 @@ func Evaluate(cfg *manifest.Config, surface manifest.Surface, opts Options) *rep
 		Surface: surface, Level: level, Allow: cfg.Allow, Zone: cfg.DNS.Zone,
 		Resolver: resolver,
 		RepoDir:  opts.RepoDir, DistDir: opts.DistDir, WorkflowsDir: opts.WorkflowsDir,
-		Now: opts.Now, HTTP: opts.HTTP, Doc: doc, Tools: tools,
+		Now: opts.Now, HTTP: opts.HTTP, Doc: rootDoc, Tools: tools,
 	}
 
 	all := rules.All()
@@ -84,7 +88,12 @@ func Evaluate(cfg *manifest.Config, surface manifest.Surface, opts Options) *rep
 			continue
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), opts.PerCheck)
-		out := check(ctx, cctx)
+		var out rules.Outcome
+		if r.Plane == rules.PlaneStatic && len(docs) > 1 {
+			out = worstAcrossDocs(ctx, check, cctx, docs)
+		} else {
+			out = check(ctx, cctx)
+		}
 		cancel()
 		results = append(results, rules.Stamp(r, out))
 	}
@@ -193,6 +202,77 @@ func score(results []rules.Result, active map[string]bool, byID map[string]rules
 		pct = 100 * float64(earned) / float64(possible)
 	}
 	return report.Score{Earned: earned, Possible: possible, Pct: pct, DeviationDebt: debt}
+}
+
+// fetchDocs retrieves the surface root plus any extra declared same-origin
+// paths, each with bounded retries. The root is always first; unreachable URLs
+// are dropped (a static check over zero docs stays INCONCLUSIVE via cctx.Doc==nil).
+func fetchDocs(client *httpx.Client, surfaceURL string, paths []string, perCheck time.Duration) []*httpx.Doc {
+	targets := []string{surfaceURL}
+	if base, err := url.Parse(surfaceURL); err == nil {
+		seen := map[string]bool{surfaceURL: true}
+		for _, p := range paths {
+			ref, err := url.Parse(strings.TrimSpace(p))
+			if err != nil {
+				continue
+			}
+			full := base.ResolveReference(ref).String()
+			if !seen[full] {
+				seen[full] = true
+				targets = append(targets, full)
+			}
+		}
+	}
+	var docs []*httpx.Doc
+	for _, t := range targets {
+		if d := fetchWithRetry(client, t, perCheck, 3); d != nil {
+			docs = append(docs, d)
+		}
+	}
+	return docs
+}
+
+// fetchWithRetry retries a transient fetch failure within the per-check budget so
+// a single network blip doesn't turn the whole gate red.
+func fetchWithRetry(client *httpx.Client, target string, perCheck time.Duration, attempts int) *httpx.Doc {
+	for i := 0; i < attempts; i++ {
+		ctx, cancel := context.WithTimeout(context.Background(), perCheck)
+		d, err := client.Fetch(ctx, target)
+		cancel()
+		if err == nil {
+			return d
+		}
+	}
+	return nil
+}
+
+// worstAcrossDocs runs a static checker against every sampled document and keeps
+// the worst outcome (Fail > Inconclusive > Pass > N/A) — a per-path weakness is
+// never masked by a stronger root.
+func worstAcrossDocs(ctx context.Context, check rules.Checker, base *rules.CheckCtx, docs []*httpx.Doc) rules.Outcome {
+	var worst rules.Outcome
+	for i, d := range docs {
+		cc := *base
+		cc.Doc = d
+		o := check(ctx, &cc)
+		if i == 0 || statusRank(o.Status) > statusRank(worst.Status) {
+			worst = o
+		}
+	}
+	return worst
+}
+
+func statusRank(s rules.Status) int {
+	switch s {
+	case rules.Fail:
+		return 3
+	case rules.Inconclusive:
+		return 2
+	case rules.Pass:
+		return 1
+	default: // N/A
+		return 0
+	}
 }
 
 // hermeticOutcome infers whether the build environment is ephemeral/hermetic
