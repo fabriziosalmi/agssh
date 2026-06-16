@@ -289,6 +289,46 @@ func chkTLSFloor(_ context.Context, c *CheckCtx) Outcome {
 
 // ---------- supply chain ----------
 
+// lockfiles maps a known lockfile to the substring that proves it pins
+// dependencies by integrity hash. An empty marker means the file IS the hash set
+// (e.g. go.sum), so its presence alone proves pinning.
+var lockfiles = []struct{ name, marker string }{
+	{"package-lock.json", `"integrity"`},
+	{"npm-shrinkwrap.json", `"integrity"`},
+	{"yarn.lock", "integrity "},
+	{"pnpm-lock.yaml", "integrity:"},
+	{"Cargo.lock", "checksum = "},
+	{"go.sum", ""},
+	{"poetry.lock", "hash"},
+	{"Pipfile.lock", `"hashes"`},
+	{"composer.lock", "shasum"},
+}
+
+// AG-SUP-02: dependencies are pinned by integrity hash. We audit the recognised
+// lockfiles present in the repo: each must carry integrity hashes. No recognised
+// lockfile -> INCONCLUSIVE (fail-closed, nothing to prove against).
+func chkPinnedDeps(_ context.Context, c *CheckCtx) Outcome {
+	var audited, unpinned []string
+	for _, lf := range lockfiles {
+		b, err := os.ReadFile(filepath.Join(c.RepoDir, lf.name))
+		if err != nil {
+			continue
+		}
+		audited = append(audited, lf.name)
+		if lf.marker != "" && !bytes.Contains(b, []byte(lf.marker)) {
+			unpinned = append(unpinned, lf.name)
+		}
+	}
+	if len(audited) == 0 {
+		return inconclusive("no recognised lockfile to audit for integrity hashes")
+	}
+	if len(unpinned) > 0 {
+		return bad("lockfile(s) without integrity hashes: "+strings.Join(unpinned, ", "),
+			"every dependency pinned by integrity hash")
+	}
+	return okay("integrity-hash-pinned lockfiles: "+strings.Join(audited, ", "), "")
+}
+
 // AG-SUP-04: no secrets in the shipped artifact (gitleaks over dist).
 func chkNoSecrets(ctx context.Context, c *CheckCtx) Outcome {
 	if c.Tools.Gitleaks == "" {

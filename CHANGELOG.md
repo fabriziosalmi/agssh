@@ -21,11 +21,23 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **AG-DNS-03 detects resolving-but-unclaimed takeover targets** via provider +
   body fingerprints, not only NXDOMAIN. (#5)
 
+### Added
+- **AG-SUP-02 is now implemented**: audits the recognised lockfiles present
+  (npm/yarn/pnpm/Cargo/go.sum/poetry/Pipfile/composer) for integrity hashes. No
+  recognised lockfile → INCONCLUSIVE (fail-closed). (#9)
+- **Multi-path surfaces**: a surface may declare extra `paths:`; static
+  header/CSP checks are evaluated **worst-case** across the root + every path, and
+  fetches now retry transient failures within the per-check budget. (#7)
+
 ### Changed
 - **DNS resolver is configurable** (`dns.resolver` in the manifest, or `-resolver`)
   and defaults to the host's `resolv.conf` — no public IP baked into the runner. (#6)
-- First real unit tests for the checkers (HTTP/DNS/TLS fixtures); `internal/rules`
-  coverage 0% → ~34%. (#1)
+
+### Tests
+- The fail-closed gate is now pinned by an **exhaustive truth table**, and waiver
+  governance (MUST-non-waivable, expiry, Gold segregation-of-duties, debt ceiling)
+  by direct cases. Coverage: `internal/engine` 0% → ~59%, `internal/rules`
+  0% → ~50%, `internal/manifest` 0% → ~75%. (#1)
 
 
 ## [1.0.0]
