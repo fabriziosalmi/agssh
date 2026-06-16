@@ -123,6 +123,10 @@ type Allow struct {
 
 type DNS struct {
 	Zone string `yaml:"zone"`
+	// Resolver is the DNS server (host or host:port) used for CAA/DNSSEC/dangling
+	// probing. Empty means "use the host's configured resolver" (resolv.conf) —
+	// no public IP is baked into the runner. Override per-repo or via -resolver.
+	Resolver string `yaml:"resolver"`
 }
 
 type Pipeline struct {

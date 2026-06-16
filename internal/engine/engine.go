@@ -27,6 +27,7 @@ type Options struct {
 	Sign         bool
 	ArtifactPath string
 	PerCheck     time.Duration
+	Resolver     string // DNS resolver override; empty => host default
 }
 
 // Evaluate runs the full conformance assessment for one surface.
@@ -48,9 +49,14 @@ func Evaluate(cfg *manifest.Config, surface manifest.Surface, opts Options) *rep
 		cancel()
 	}
 
+	resolver := opts.Resolver
+	if resolver == "" {
+		resolver = cfg.DNS.Resolver
+	}
 	cctx := &rules.CheckCtx{
 		Surface: surface, Level: level, Allow: cfg.Allow, Zone: cfg.DNS.Zone,
-		RepoDir: opts.RepoDir, DistDir: opts.DistDir, WorkflowsDir: opts.WorkflowsDir,
+		Resolver: resolver,
+		RepoDir:  opts.RepoDir, DistDir: opts.DistDir, WorkflowsDir: opts.WorkflowsDir,
 		Now: opts.Now, HTTP: opts.HTTP, Doc: doc, Tools: tools,
 	}
 
