@@ -86,11 +86,12 @@ justification stays a human decision — the runner governs the mechanics only.
 | engine | waiver governance, signing, hermetic-build hints | `cosign` (Gold) |
 
 All 57 rules are registered with full metadata; implemented checkers span every
-plane. Rules whose verification is genuinely environment- or process-specific
-(reproducible-build comparison, branch protection via the GitHub API,
-generated-file metadata) are registered `INCONCLUSIVE` with the exact approach to
-wire in — they block until proven, and each is a single `Checker` in
-`internal/rules`.
+plane, including branch protection via the GitHub API (AG-CI-05) and runtime
+service-worker / client-storage inspection (AG-NET-07 / AG-PRV-04). The remaining
+rules whose verification is genuinely process-specific — reproducible-build
+comparison, deterministic-output diffing, report-only rollout history — are
+registered `INCONCLUSIVE` with the exact approach to wire in: they block until
+proven, and each is a single `Checker` in `internal/rules`.
 
 ## License
 
