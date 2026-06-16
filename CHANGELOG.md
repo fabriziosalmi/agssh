@@ -6,6 +6,40 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (adversarial review pass)
+- **TLS floor false-PASS, take 2.** The probe offered only CBC-SHA1 suites, so an
+  AEAD/ChaCha-only-but-TLS-1.0-permitting server answered `handshake_failure` and
+  was misread as "refused" → PASS. The probe now decodes the alert: only a clean
+  `protocol_version` alert counts as a refusal; any other answer (or an unreachable
+  host) is INCONCLUSIVE, never PASS.
+- **IPv6 surfaces are no longer mangled.** `hostOnly`/`surfaceAddr` used first-colon
+  splitting (`[::1]` → `[`), silently breaking the TLS/DNS/dynamic checks for every
+  IPv6 surface. Now parsed with `net/url`.
+- **AG-CI-02:** a top-level `permissions` block no longer hides a per-job
+  `permissions: write-all`. **AG-CI-03:** now also flags `github.head_ref`,
+  `with.repository: …head.repo…`, and `refs/pull/…/merge` checkouts, and matches
+  `actions/checkout` exactly (no typosquat). **AG-CI-01:** uppercase commit SHAs
+  accepted.
+- **AG-CI-05:** reads the modern `required_status_checks.checks[]` (not only the
+  legacy `contexts[]`) so a properly-protected branch isn't false-FAILed, and now
+  requires ≥1 approving review.
+- **AG-DNS-03:** the takeover body-fingerprint check is gated on a takeover-prone
+  provider and the over-generic phrases ("Repository not found", "project not
+  found") were removed — no more false FAIL on benign pages.
+- **AG-SUP-02:** stronger lockfile markers — poetry/Pipfile match a per-dependency
+  `sha256:` (not the lockfile-wide `content-hash`), yarn berry's `checksum:` is
+  recognized, an empty `go.sum` no longer false-PASSes, and the weak composer
+  `shasum` marker was dropped.
+- **AG-PRV-04:** evaluates only `localStorage`/`sessionStorage` — server-set
+  (`Set-Cookie`) cookies are no longer mis-attributed as un-minimized client
+  storage (that's AG-PRV-05's job), and the storage JS is now exception-safe.
+- **Engine:** declared `surface.paths` are now restricted to the **same origin**
+  (an off-origin `//evil.com` path can no longer poison worst-case static analysis
+  or the signed record), and fetch retries share one per-check budget instead of
+  multiplying latency.
+- osv-scanner results are also read from `groups[].ids` (modern schema), not only
+  `vulnerabilities[].id`.
+
 ### Fixed
 - **AG-HDR-08 (TLS floor) no longer false-PASSes.** The legacy-refusal probe used
   `crypto/tls`, whose client refuses TLS 1.0/1.1 on its own (Go 1.22+), so it

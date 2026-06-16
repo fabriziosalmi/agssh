@@ -6,51 +6,75 @@ import (
 	"time"
 )
 
-// offersLegacyTLS reports whether the server at addr will negotiate TLS 1.0/1.1.
+// offersLegacyTLS probes whether the server at addr will negotiate TLS 1.0/1.1.
 // It hand-builds a TLS 1.0 ClientHello and inspects the server's first record so
 // the verdict reflects the *server's* policy, not the Go client's (which refuses
-// legacy TLS on its own since Go 1.22). reachable is false when the TCP/probe
-// could not be completed, so the caller can report INCONCLUSIVE rather than PASS.
+// legacy TLS on its own since Go 1.22).
 //
-//   - ServerHello with negotiated version <= TLS 1.1  -> accepted (FAIL)
-//   - fatal alert / connection closed / higher version -> refused (good)
-func offersLegacyTLS(addr, sni string, timeout time.Duration) (accepted, reachable bool) {
+// It returns a 3-state result so the caller never turns an ambiguous probe into a
+// PASS:
+//   - accepted: a ServerHello negotiated TLS <= 1.1 (legacy IS accepted -> FAIL)
+//   - conclusive==false: we could not connect, OR the server answered with a
+//     non-protocol_version error (e.g. handshake_failure from no cipher overlap),
+//     which does NOT prove the version floor. The caller maps this to INCONCLUSIVE.
+//   - accepted==false && conclusive==true: the server refused with a clean
+//     protocol_version alert (legacy refused -> good).
+//
+// Crucially, an AEAD/ChaCha-only-but-TLS-1.0-permitting server (a common
+// misconfig) sends handshake_failure to our CBC-only ClientHello; treating that
+// as "refused" would resurrect the very false-PASS this probe exists to prevent,
+// so it is reported as inconclusive instead.
+func offersLegacyTLS(addr, sni string, timeout time.Duration) (accepted, conclusive bool) {
 	d := net.Dialer{Timeout: timeout}
 	conn, err := d.Dial("tcp", addr)
 	if err != nil {
-		return false, false
+		return false, false // unreachable -> INCONCLUSIVE
 	}
 	defer conn.Close()
 	_ = conn.SetDeadline(time.Now().Add(timeout))
 
 	if _, err := conn.Write(clientHelloTLS10(sni)); err != nil {
-		return false, true
+		return false, false
 	}
 
 	hdr := make([]byte, 5) // TLS record header: type(1) version(2) length(2)
 	if _, err := io.ReadFull(conn, hdr); err != nil {
-		return false, true // RST/EOF before any record => refused
+		return false, false // RST/EOF before any record -> ambiguous, not provable
 	}
+	n := int(hdr[3])<<8 | int(hdr[4])
 	switch hdr[0] {
-	case 21: // alert (e.g. protocol_version / handshake_failure) => refused
-		return false, true
-	case 22: // handshake
-		n := int(hdr[3])<<8 | int(hdr[4])
-		if n < 6 {
-			return false, true
+	case 21: // alert: read level+description
+		if n < 2 {
+			return false, false
 		}
 		body := make([]byte, n)
 		if _, err := io.ReadFull(conn, body); err != nil {
-			return false, true
+			return false, false
+		}
+		const protocolVersion = 70 // RFC 5246 alert description
+		if body[1] == protocolVersion {
+			return false, true // server explicitly refuses this version
+		}
+		return false, false // handshake_failure / other -> can't conclude the floor
+	case 22: // handshake
+		if n < 6 {
+			return false, false
+		}
+		body := make([]byte, n)
+		if _, err := io.ReadFull(conn, body); err != nil {
+			return false, false
 		}
 		if body[0] != 2 { // not a ServerHello
-			return false, true
+			return false, false
 		}
 		// ServerHello.server_version sits right after the 4-byte handshake header.
 		ver := uint16(body[4])<<8 | uint16(body[5])
-		return ver <= 0x0302, true // 0x0301=TLS1.0, 0x0302=TLS1.1
+		if ver <= 0x0302 { // 0x0301=TLS1.0, 0x0302=TLS1.1
+			return true, true // legacy negotiated -> definitive FAIL
+		}
+		return false, true // negotiated >= 1.2 off a 1.0 hello -> legacy not used
 	default:
-		return false, true
+		return false, false
 	}
 }
 
