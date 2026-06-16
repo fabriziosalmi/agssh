@@ -1,23 +1,47 @@
 package rules
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 
 	"github.com/miekg/dns"
 )
 
-const resolver = "1.1.1.1:53" // validating resolver for DNSSEC AD probing
+// effectiveResolver resolves the DNS server to query: the explicit override
+// (manifest dns.resolver / -resolver), else the host's own configured resolver
+// from resolv.conf. No public IP is baked into the runner — fitting for a tool
+// whose thesis is "no third-party egress you didn't declare". Empty means we
+// could not determine one, and the DNS checks go INCONCLUSIVE (fail-closed).
+func effectiveResolver(override string) string {
+	if r := strings.TrimSpace(override); r != "" {
+		if _, _, err := net.SplitHostPort(r); err != nil {
+			r = net.JoinHostPort(r, "53") // bare host -> :53
+		}
+		return r
+	}
+	if cfg, err := dns.ClientConfigFromFile("/etc/resolv.conf"); err == nil && len(cfg.Servers) > 0 {
+		port := cfg.Port
+		if port == "" {
+			port = "53"
+		}
+		return net.JoinHostPort(cfg.Servers[0], port)
+	}
+	return ""
+}
 
-func dnsQuery(zone string, qtype uint16, wantDO bool) (*dns.Msg, error) {
+func dnsQuery(resolver, zone string, qtype uint16, wantDO bool) (*dns.Msg, error) {
+	if resolver == "" {
+		return nil, fmt.Errorf("no DNS resolver available (set dns.resolver or -resolver)")
+	}
 	m := new(dns.Msg)
 	fqdn := dns.Fqdn(zone)
 	m.SetQuestion(fqdn, qtype)
@@ -34,7 +58,11 @@ func chkCAA(_ context.Context, c *CheckCtx) Outcome {
 	if c.Zone == "" {
 		return inconclusive("no dns.zone declared in manifest")
 	}
-	resp, err := dnsQuery(c.Zone, dns.TypeCAA, false)
+	r := effectiveResolver(c.Resolver)
+	if r == "" {
+		return inconclusive("no DNS resolver available (set dns.resolver or -resolver)")
+	}
+	resp, err := dnsQuery(r, c.Zone, dns.TypeCAA, false)
 	if err != nil {
 		return inconclusive("CAA query failed: " + err.Error())
 	}
@@ -56,14 +84,18 @@ func chkDNSSEC(_ context.Context, c *CheckCtx) Outcome {
 	if c.Zone == "" {
 		return inconclusive("no dns.zone declared in manifest")
 	}
-	resp, err := dnsQuery(c.Zone, dns.TypeSOA, true)
+	r := effectiveResolver(c.Resolver)
+	if r == "" {
+		return inconclusive("no DNS resolver available (set dns.resolver or -resolver)")
+	}
+	resp, err := dnsQuery(r, c.Zone, dns.TypeSOA, true)
 	if err != nil {
 		return inconclusive("DNSSEC query failed: " + err.Error())
 	}
 	if resp.AuthenticatedData {
 		return okay("resolver set AD (DNSSEC-validated)", "")
 	}
-	keyResp, err := dnsQuery(c.Zone, dns.TypeDNSKEY, true)
+	keyResp, err := dnsQuery(r, c.Zone, dns.TypeDNSKEY, true)
 	if err == nil {
 		for _, rr := range keyResp.Answer {
 			if _, ok := rr.(*dns.DNSKEY); ok {
@@ -74,13 +106,20 @@ func chkDNSSEC(_ context.Context, c *CheckCtx) Outcome {
 	return bad("no AD bit and no DNSKEY", "DNSSEC-signed zone")
 }
 
-// AG-DNS-03: the surface host has no dangling CNAME (takeover risk).
+// AG-DNS-03: the surface host has no danglable CNAME (takeover risk). A target
+// that does NOT resolve is the classic dangling case. A target that DOES resolve
+// can still be an unclaimed resource on a takeover-prone provider — detected via
+// the live surface body fingerprint. (The original check only caught the former.)
 func chkDangling(_ context.Context, c *CheckCtx) Outcome {
+	r := effectiveResolver(c.Resolver)
+	if r == "" {
+		return inconclusive("no DNS resolver available (set dns.resolver or -resolver)")
+	}
 	host := hostOnly(c.Surface.URL)
 	if host == "" {
 		return inconclusive("cannot derive surface host")
 	}
-	cn, err := dnsQuery(host, dns.TypeCNAME, false)
+	cn, err := dnsQuery(r, host, dns.TypeCNAME, false)
 	if err != nil {
 		return inconclusive("CNAME query failed: " + err.Error())
 	}
@@ -93,15 +132,92 @@ func chkDangling(_ context.Context, c *CheckCtx) Outcome {
 	if target == "" {
 		return okay("no CNAME (apex or A/AAAA)", "")
 	}
-	// Resolve the CNAME target; NXDOMAIN/empty => dangling.
-	a, err := dnsQuery(target, dns.TypeA, false)
+	// 1) Classic dangling: the CNAME target does not resolve.
+	a, err := dnsQuery(r, target, dns.TypeA, false)
 	if err != nil {
 		return inconclusive("target A query failed: " + err.Error())
 	}
 	if a.Rcode == dns.RcodeNameError || len(a.Answer) == 0 {
 		return bad("CNAME -> "+target+" does not resolve (dangling)", "every CNAME target resolves")
 	}
-	return okay("CNAME -> "+target+" resolves", "")
+	// 2) Target resolves but may be unclaimed: match the live body fingerprint.
+	body := ""
+	if c.Doc != nil {
+		body = string(c.Doc.Body)
+	}
+	if sig, matched := takeoverFingerprint(body); matched {
+		return bad("CNAME -> "+target+" serves an unclaimed-resource fingerprint: "+sig,
+			"CNAME target is a claimed, serving resource")
+	}
+	// 3) Resolves, on a takeover-prone provider, but we have no body to confirm it
+	// is claimed -> fail-closed INCONCLUSIVE rather than a silent PASS.
+	if prov, ok := takeoverProvider(target); ok && body == "" {
+		return inconclusive("CNAME -> " + target + " points at " + prov +
+			" (takeover-prone) and the surface body is unavailable to confirm it is claimed")
+	}
+	return okay("CNAME -> "+target+" resolves; no takeover fingerprint", "")
+}
+
+// takeoverProvider reports whether target is hosted on a provider where an
+// unclaimed/unconfigured resource is a known subdomain-takeover vector.
+func takeoverProvider(target string) (string, bool) {
+	t := strings.ToLower(strings.TrimSuffix(target, "."))
+	for _, p := range takeoverProviders {
+		if strings.HasSuffix(t, p.suffix) {
+			return p.name, true
+		}
+	}
+	return "", false
+}
+
+var takeoverProviders = []struct{ suffix, name string }{
+	{".github.io", "GitHub Pages"},
+	{".herokuapp.com", "Heroku"},
+	{".herokudns.com", "Heroku"},
+	{".s3.amazonaws.com", "AWS S3"},
+	{".cloudfront.net", "AWS CloudFront"},
+	{".azurewebsites.net", "Azure App Service"},
+	{".cloudapp.net", "Azure Cloud"},
+	{".trafficmanager.net", "Azure Traffic Manager"},
+	{".blob.core.windows.net", "Azure Blob"},
+	{".fastly.net", "Fastly"},
+	{".ghost.io", "Ghost"},
+	{".pantheonsite.io", "Pantheon"},
+	{".readthedocs.io", "Read the Docs"},
+	{".surge.sh", "Surge"},
+	{".bitbucket.io", "Bitbucket"},
+	{".netlify.app", "Netlify"},
+	{".wordpress.com", "WordPress"},
+	{".statuspage.io", "Statuspage"},
+	{".zendesk.com", "Zendesk"},
+}
+
+// takeoverFingerprint returns a matched provider "unclaimed resource" signature
+// found in the response body, if any. Signatures are kept specific to avoid
+// false positives on ordinary 404 pages.
+func takeoverFingerprint(body string) (string, bool) {
+	lb := strings.ToLower(body)
+	for _, sig := range takeoverFingerprints {
+		if strings.Contains(lb, strings.ToLower(sig)) {
+			return sig, true
+		}
+	}
+	return "", false
+}
+
+var takeoverFingerprints = []string{
+	"There isn't a GitHub Pages site here",
+	"herokucdn.com/error-pages/no-such-app.html",
+	"NoSuchBucket",
+	"The specified bucket does not exist",
+	"Fastly error: unknown domain",
+	"Sorry, this shop is currently unavailable",                             // Shopify
+	"Whatever you were looking for doesn't currently exist at this address", // Tumblr
+	"Site not found · Netlify",
+	"project not found", // Surge
+	"This UserVoice subdomain is currently available",
+	"Do you want to register *.wordpress.com",
+	"Repository not found", // Bitbucket/GitHub Pages-style
 }
 
 func hostOnly(raw string) string {
@@ -118,25 +234,53 @@ func hostOnly(raw string) string {
 	return strings.ToLower(raw)
 }
 
+// surfaceAddr returns host:port for the surface URL, defaulting to :443.
+func surfaceAddr(raw string) string {
+	h := hostOnly(raw)
+	if h == "" {
+		return ""
+	}
+	rest := strings.TrimSpace(raw)
+	if i := strings.Index(rest, "://"); i >= 0 {
+		rest = rest[i+3:]
+	}
+	if i := strings.IndexAny(rest, "/?#"); i >= 0 {
+		rest = rest[:i]
+	}
+	if i := strings.LastIndex(rest, ":"); i >= 0 {
+		if port := rest[i+1:]; port != "" {
+			return net.JoinHostPort(h, port)
+		}
+	}
+	return net.JoinHostPort(h, "443")
+}
+
 // AG-HDR-08: TLS floor — legacy TLS (1.0/1.1) MUST be refused; 1.2+ MUST work.
+//
+// The legacy probe sends a hand-built TLS 1.0 ClientHello over a raw socket and
+// inspects the server's first record. We do NOT use crypto/tls for the legacy
+// dial: since Go 1.22 the standard library client refuses to negotiate TLS
+// 1.0/1.1 itself, so a crypto/tls dial would fail client-side and we'd score a
+// false PASS even against a server that still accepts legacy TLS.
 func chkTLSFloor(_ context.Context, c *CheckCtx) Outcome {
 	host := hostOnly(c.Surface.URL)
-	if host == "" {
+	addr := surfaceAddr(c.Surface.URL)
+	if host == "" || addr == "" {
 		return inconclusive("cannot derive surface host")
 	}
-	addr := net.JoinHostPort(host, "443")
-	dialer := &net.Dialer{Timeout: 6 * time.Second}
-
-	legacy := &tls.Config{ServerName: host, MinVersion: tls.VersionTLS10, MaxVersion: tls.VersionTLS11}
-	if conn, err := tls.DialWithDialer(dialer, "tcp", addr, legacy); err == nil {
-		v := conn.ConnectionState().Version
-		conn.Close()
-		return bad(fmt.Sprintf("legacy TLS accepted (0x%04x)", v), "TLS 1.0/1.1 refused")
+	accepted, reachable := offersLegacyTLS(addr, host, 6*time.Second)
+	if !reachable {
+		return inconclusive("cannot reach " + addr + " for TLS probe")
 	}
-	modern := &tls.Config{ServerName: host, MinVersion: tls.VersionTLS12}
-	conn, err := tls.DialWithDialer(dialer, "tcp", addr, modern)
+	if accepted {
+		return bad("legacy TLS (1.0/1.1) accepted", "TLS 1.0/1.1 refused")
+	}
+	// Confirm 1.2+ actually works. We only assert the version floor here, not the
+	// PKI (certificate validity is out of scope for this rule), so trust is skipped.
+	modern := &tls.Config{ServerName: host, MinVersion: tls.VersionTLS12, InsecureSkipVerify: true} //nolint:gosec // version-floor probe, not a trust check
+	conn, err := tls.DialWithDialer(&net.Dialer{Timeout: 6 * time.Second}, "tcp", addr, modern)
 	if err != nil {
-		return inconclusive("TLS 1.2+ handshake failed: " + err.Error())
+		return inconclusive("legacy refused but TLS 1.2+ handshake failed: " + err.Error())
 	}
 	v := conn.ConnectionState().Version
 	conn.Close()
@@ -184,18 +328,64 @@ func chkNoSourceMaps(_ context.Context, c *CheckCtx) Outcome {
 	return okay("no source maps in dist", "")
 }
 
-// AG-SUP-06: no known-vulnerable dependencies (osv-scanner).
+// AG-SUP-06: no known-vulnerable dependencies (osv-scanner). The exit code is
+// unreliable (osv-scanner exits non-zero for vulns AND for scan errors / missing
+// lockfiles), so we parse the JSON: a scan error -> INCONCLUSIVE (honest,
+// fail-closed), real advisories -> FAIL, clean -> PASS.
 func chkNoKnownVulns(ctx context.Context, c *CheckCtx) Outcome {
 	if c.Tools.OSVScanner == "" {
 		return inconclusive("osv-scanner not found on PATH")
 	}
-	cmd := exec.CommandContext(ctx, c.Tools.OSVScanner, "scan", "--recursive", c.RepoDir)
-	out, err := cmd.CombinedOutput()
-	if err == nil {
+	cmd := exec.CommandContext(ctx, c.Tools.OSVScanner, "--format=json", "--recursive", c.RepoDir)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	_ = cmd.Run() // verdict comes from the JSON, not the exit code
+	n, ids, ok := parseOSVResults(stdout.Bytes())
+	if !ok {
+		return inconclusive("osv-scanner produced no parseable JSON (scan error?): " + lastLine(stderr.Bytes()))
+	}
+	if n == 0 {
 		return okay("osv-scanner: no known vulnerabilities", "")
 	}
-	// osv-scanner exits non-zero when vulnerabilities are found.
-	return bad("osv-scanner reported vulnerabilities: "+lastLine(out), "0 known high/critical advisories")
+	advis := "advisories"
+	if n == 1 {
+		advis = "advisory"
+	}
+	return bad(fmt.Sprintf("osv-scanner: %d known %s (%s)", n, advis, strings.Join(ids, ", ")), "0 known advisories")
+}
+
+// parseOSVResults flattens osv-scanner JSON to a de-duplicated vulnerability-ID
+// list. ok=false means the output was not valid osv-scanner JSON (a scan error,
+// not a clean result) — the caller maps that to INCONCLUSIVE, never PASS.
+func parseOSVResults(jsonOut []byte) (count int, ids []string, ok bool) {
+	jsonOut = bytes.TrimSpace(jsonOut)
+	if len(jsonOut) == 0 {
+		return 0, nil, false
+	}
+	var doc struct {
+		Results []struct {
+			Packages []struct {
+				Vulnerabilities []struct {
+					ID string `json:"id"`
+				} `json:"vulnerabilities"`
+			} `json:"packages"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(jsonOut, &doc); err != nil {
+		return 0, nil, false
+	}
+	seen := map[string]bool{}
+	for _, r := range doc.Results {
+		for _, p := range r.Packages {
+			for _, v := range p.Vulnerabilities {
+				if v.ID != "" && !seen[v.ID] {
+					seen[v.ID] = true
+					ids = append(ids, v.ID)
+				}
+			}
+		}
+	}
+	return len(ids), ids, true
 }
 
 // AG-SUP-07: an SBOM is produced and retained.
@@ -212,86 +402,6 @@ func chkSBOM(_ context.Context, c *CheckCtx) Outcome {
 	return bad("no SBOM artifact found", "an SPDX/CycloneDX SBOM retained with the build")
 }
 
-// ---------- CI / pipeline ----------
-
-var usesRe = regexp.MustCompile(`(?m)uses:\s*([^\s#]+)`)
-var sha40Re = regexp.MustCompile(`^[0-9a-f]{40}$`)
-
-func workflowFiles(dir string) []string {
-	var fs []string
-	for _, ext := range []string{"*.yml", "*.yaml"} {
-		m, _ := filepath.Glob(filepath.Join(dir, ext))
-		fs = append(fs, m...)
-	}
-	return fs
-}
-
-// AG-CI-01: third-party Actions are pinned to a full 40-char commit SHA.
-func chkPinnedActions(_ context.Context, c *CheckCtx) Outcome {
-	files := workflowFiles(c.WorkflowsDir)
-	if len(files) == 0 {
-		return inconclusive("no workflow files at " + c.WorkflowsDir)
-	}
-	var unpinned []string
-	for _, f := range files {
-		b, err := os.ReadFile(f)
-		if err != nil {
-			continue
-		}
-		for _, m := range usesRe.FindAllStringSubmatch(string(b), -1) {
-			ref := strings.Trim(m[1], `"'`)
-			if strings.HasPrefix(ref, "./") || strings.HasPrefix(ref, "docker://") {
-				continue // local / docker pin handled elsewhere
-			}
-			parts := strings.SplitN(ref, "@", 2)
-			if len(parts) != 2 || !sha40Re.MatchString(parts[1]) {
-				unpinned = append(unpinned, ref)
-			}
-		}
-	}
-	if len(unpinned) > 0 {
-		return bad("unpinned Actions: "+strings.Join(uniq(unpinned), ", "), "uses: owner/action@<40-char-sha>")
-	}
-	return okay("all third-party Actions SHA-pinned", "")
-}
-
-// AG-CI-02: workflows declare least-privilege top-level permissions.
-func chkLeastPriv(_ context.Context, c *CheckCtx) Outcome {
-	files := workflowFiles(c.WorkflowsDir)
-	if len(files) == 0 {
-		return inconclusive("no workflow files at " + c.WorkflowsDir)
-	}
-	for _, f := range files {
-		b, _ := os.ReadFile(f)
-		s := string(b)
-		if !strings.Contains(s, "permissions:") {
-			return bad("workflow without explicit permissions: "+filepath.Base(f), "top-level permissions, defaulting to read")
-		}
-		if strings.Contains(s, "permissions: write-all") || strings.Contains(s, "permissions: read-all") {
-			return bad("over-broad permissions in "+filepath.Base(f), "scope write to the job that needs it")
-		}
-	}
-	return okay("workflows declare scoped permissions", "")
-}
-
-// AG-CI-03: untrusted code is not run in a privileged context.
-func chkNoUntrustedPriv(_ context.Context, c *CheckCtx) Outcome {
-	files := workflowFiles(c.WorkflowsDir)
-	if len(files) == 0 {
-		return inconclusive("no workflow files at " + c.WorkflowsDir)
-	}
-	for _, f := range files {
-		b, _ := os.ReadFile(f)
-		s := string(b)
-		if strings.Contains(s, "pull_request_target") &&
-			(strings.Contains(s, "github.event.pull_request.head") || strings.Contains(s, "head.sha") || strings.Contains(s, "head.ref")) {
-			return bad("pull_request_target checks out PR head: "+filepath.Base(f),
-				"never build untrusted PR code with elevated tokens")
-		}
-	}
-	return okay("no untrusted-code-in-privileged-context pattern", "")
-}
-
 func lastLine(b []byte) string {
 	lines := strings.Split(strings.TrimRight(string(b), "\n"), "\n")
 	if len(lines) == 0 {
@@ -302,16 +412,4 @@ func lastLine(b []byte) string {
 		s = s[:200]
 	}
 	return s
-}
-
-func uniq(in []string) []string {
-	seen := map[string]bool{}
-	var out []string
-	for _, v := range in {
-		if !seen[v] {
-			seen[v] = true
-			out = append(out, v)
-		}
-	}
-	return out
 }

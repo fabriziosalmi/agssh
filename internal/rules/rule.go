@@ -194,6 +194,7 @@ type CheckCtx struct {
 	Level        manifest.Level
 	Allow        manifest.Allow
 	Zone         string
+	Resolver     string // DNS resolver host:port; empty => host default (resolv.conf)
 	RepoDir      string
 	DistDir      string
 	WorkflowsDir string

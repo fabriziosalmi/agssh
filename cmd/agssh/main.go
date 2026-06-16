@@ -40,6 +40,7 @@ func main() {
 	author := flag.String("author", os.Getenv("AGSSH_AUTHOR"), "change author (waiver segregation of duties)")
 	approversPath := flag.String("approvers", "", "file with one approved waiver-approver per line")
 	timeout := flag.Duration("timeout", 45*time.Second, "per-check timeout")
+	resolver := flag.String("resolver", "", "DNS resolver host[:port] for CAA/DNSSEC/dangling (default: host resolv.conf)")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
 
@@ -85,6 +86,7 @@ func main() {
 		RepoDir: *repo, DistDir: *dist, WorkflowsDir: *workflows,
 		HTTP: httpx.New(*timeout), Now: time.Now(), Author: *author,
 		Approvers: approvers, Sign: *sign, ArtifactPath: *artifact, PerCheck: *timeout,
+		Resolver: *resolver,
 	}
 
 	allConformant := true

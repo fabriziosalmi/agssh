@@ -6,6 +6,28 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **AG-HDR-08 (TLS floor) no longer false-PASSes.** The legacy-refusal probe used
+  `crypto/tls`, whose client refuses TLS 1.0/1.1 on its own (Go 1.22+), so it
+  scored PASS even against servers that still accept legacy TLS. Replaced with a
+  raw TLS 1.0 `ClientHello` probe (with EC group/point-format extensions so ECDSA
+  servers negotiate) that reflects the server's policy. (#2)
+- **CI checks (AG-CI-01/02/03) parse a real YAML AST** instead of `strings.Contains`.
+  Job-level `permissions` no longer satisfies the top-level rule, commented
+  directives no longer count, and `pull_request_target` is flagged only when it
+  actually checks out an untrusted ref. (#3)
+- **AG-SUP-06 reads osv-scanner JSON**: a scan error / missing lockfile is now
+  INCONCLUSIVE, not a misreported "vulnerabilities found". (#4)
+- **AG-DNS-03 detects resolving-but-unclaimed takeover targets** via provider +
+  body fingerprints, not only NXDOMAIN. (#5)
+
+### Changed
+- **DNS resolver is configurable** (`dns.resolver` in the manifest, or `-resolver`)
+  and defaults to the host's `resolv.conf` — no public IP baked into the runner. (#6)
+- First real unit tests for the checkers (HTTP/DNS/TLS fixtures); `internal/rules`
+  coverage 0% → ~34%. (#1)
+
+
 ## [1.0.0]
 
 ### Added
