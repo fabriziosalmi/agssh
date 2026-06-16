@@ -1,0 +1,35 @@
+name: conformance
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  agssh:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write        # OIDC for keyless cosign signing at Gold (AG-GOV-05)
+    steps:
+      - uses: actions/checkout@v4   # pin to a 40-char SHA in your real workflow (AG-CI-01)
+
+      # Build the artifact you deploy, into ./dist, before the gate runs.
+      # - run: npm ci && npm run build
+
+      - name: AGSSH conformance gate
+        uses: fabriziosalmi/agssh@main   # pin to a SHA in production
+        with:
+          config: .airgap.yml
+          # profile: Gold        # override the manifest if desired
+          sign: "true"           # required at Gold
+
+      - name: Upload conformance record
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agssh-report
+          path: agssh-report.json

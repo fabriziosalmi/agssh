@@ -1,0 +1,6 @@
+# Default owner for everything in this repo.
+* @fabriziosalmi
+
+# The standard and its single-source generator.
+/standard/                 @fabriziosalmi
+/internal/rules/           @fabriziosalmi

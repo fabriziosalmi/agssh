@@ -1,0 +1,51 @@
+name: "AGSSH Conformance"
+description: "Deterministic, fail-closed conformance gate for air-gapped static surfaces (AGSSH-STD-001 v1.0.0)."
+author: "Fabrizio Salmi"
+branding:
+  icon: "shield"
+  color: "blue"
+
+inputs:
+  config:
+    description: "Path to .airgap.yml"
+    required: false
+    default: ".airgap.yml"
+  profile:
+    description: "Override target profile (Bronze|Silver|Gold). Empty = use manifest."
+    required: false
+    default: ""
+  level:
+    description: "Override level (L0|L1|L2). Empty = use manifest."
+    required: false
+    default: ""
+  sign:
+    description: "Sign the conformance record with cosign (required at Gold)."
+    required: false
+    default: "false"
+  author:
+    description: "Change author, for waiver segregation of duties."
+    required: false
+    default: ""
+  out:
+    description: "Conformance record output path (JSON)."
+    required: false
+    default: "agssh-report.json"
+
+outputs:
+  conformant:
+    description: "\"true\" if every surface met its target profile, \"false\" otherwise."
+  report:
+    description: "Path to the JSON conformance record (empty when out is '-')."
+
+runs:
+  using: "docker"
+  image: "docker://ghcr.io/fabriziosalmi/agssh:1.0.0"
+  args:
+    - "-config=${{ inputs.config }}"
+    - "-profile=${{ inputs.profile }}"
+    - "-level=${{ inputs.level }}"
+    - "-sign=${{ inputs.sign }}"
+    - "-author=${{ inputs.author }}"
+    - "-out=${{ inputs.out }}"
+    - "-repo=."
+    - "-workflows=.github/workflows"

@@ -1,0 +1,20 @@
+# runner build output (anchored to repo root so it never swallows cmd/agssh/)
+/agssh
+*.exe
+
+# conformance records
+agssh-report.json
+*.report.json
+
+# built web artifact under test
+/dist/
+
+# standard generator intermediates (the PDF is committed; HTML is not)
+standard/*.html
+standard/__pycache__/
+__pycache__/
+*.pyc
+
+# OS / editor
+.DS_Store
+*.swp

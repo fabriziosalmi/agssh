@@ -1,0 +1,42 @@
+# .airgap.yml — AGSSH-STD-001 v1.0.0 conformance declaration (one per repo).
+# Ships green-by-default: a Bronze, stateless static surface is the path of
+# least resistance. Raise target_profile as the surface's value grows.
+
+target_profile: Bronze            # Bronze | Silver | Gold (cumulative)
+level: L0                         # L0 strict | L1 scoped-egress | L2 marketing
+
+surfaces:
+  - url: https://tools.example.org/
+    kind: client-tool             # client-tool | docs | site
+    generates_files: true
+    threaded_wasm: false
+    has_service_worker: false
+    stateless: true               # Tier-D: satisfies anti-framing on header-less hosts
+
+backend: github-pages             # informational; the runner observes the live surface
+
+dns:
+  zone: example.org               # CAA / DNSSEC / dangling-CNAME checks
+
+pipeline:
+  enforce_ci_rules: true          # apply the AG-CI family to .github/workflows
+
+allow:
+  connect: []                     # L1 only: explicit origins, never '*'
+  storage: []                     # functional cookies / localStorage keys
+  embeds:  []                     # L2 only: sanctioned third-party embed hosts
+
+waivers:                          # governance for SHOULD deviations (§10 / AG-GOV)
+  budget:
+    max_count: 3
+    max_weight: 6
+    max_window_days: 30
+
+deviations: []                    # SHOULD-only; MUSTs are never waivable (AG-GOV-01)
+# - rule: AG-SUP-07               # example (commented)
+#   reason: "SBOM tooling rollout in progress"
+#   approver: alice               # must differ from the change author (AG-GOV-04, Gold)
+#   author: bob
+#   expires: 2026-08-01           # the runner re-enforces the rule after this date
+#   evidence: https://github.com/org/repo/issues/123
+#   signature: "<cosign/signed-off attestation>"

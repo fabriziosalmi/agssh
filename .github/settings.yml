@@ -1,0 +1,31 @@
+# Repository configuration as code — Probot "Settings" app format.
+# https://github.com/repository-settings/app
+# This file documents the intended server-side state. The branch-protection
+# rule below is also applied directly via the GitHub API.
+
+repository:
+  default_branch: main
+  has_issues: true
+  has_wiki: false
+  has_projects: false
+  allow_squash_merge: true
+  allow_merge_commit: false
+  allow_rebase_merge: true
+  delete_branch_on_merge: true
+
+branches:
+  - name: main
+    protection:
+      required_pull_request_reviews:
+        required_approving_review_count: 1
+        dismiss_stale_reviews: true
+      required_status_checks:
+        strict: true
+        contexts:
+          - test
+          - goreleaser-check
+      enforce_admins: false
+      required_linear_history: true
+      allow_force_pushes: false
+      allow_deletions: false
+      restrictions: null

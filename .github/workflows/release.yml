@@ -1,0 +1,58 @@
+name: release
+
+on:
+  push:
+    # Full semver tags only — the moving major tag (v1) must not trigger a release.
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  goreleaser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  image:
+    # Publishes ghcr.io/<owner>/agssh so the Action can run from a prebuilt image
+    # (action.yml: image: docker://ghcr.io/fabriziosalmi/agssh:1.0.0) instead of
+    # rebuilding the Dockerfile on every run.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Derive version
+        id: v
+        run: |
+          ref="${GITHUB_REF_NAME}"          # e.g. v1.0.0
+          ver="${ref#v}"                     # 1.0.0
+          major="${ver%%.*}"                 # 1
+          echo "ver=$ver"     >> "$GITHUB_OUTPUT"
+          echo "major=$major" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/agssh:${{ steps.v.outputs.ver }}
+            ghcr.io/${{ github.repository_owner }}/agssh:${{ steps.v.outputs.major }}
+            ghcr.io/${{ github.repository_owner }}/agssh:latest

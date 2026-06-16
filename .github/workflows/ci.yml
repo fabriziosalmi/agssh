@@ -1,0 +1,54 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: gofmt
+        run: |
+          out=$(gofmt -l .)
+          if [ -n "$out" ]; then echo "::error::gofmt needed on:"; echo "$out"; exit 1; fi
+      - run: go vet ./...
+      - run: go build ./...
+      - name: test with coverage (race)
+        run: go test -race -covermode=atomic -coverprofile=coverage.out ./...
+      - name: coverage summary
+        run: |
+          go tool cover -func=coverage.out | tee /tmp/cover.txt
+          total=$(grep -E '^total:' /tmp/cover.txt | awk '{print $3}')
+          echo "### Coverage: ${total}" >> "$GITHUB_STEP_SUMMARY"
+      - name: rule manifest must not be stale vs the spec
+        run: |
+          python3 standard/build_pdf.py
+          git diff --exit-code -- internal/rules/manifest.yaml \
+            || { echo "::error::manifest.yaml drifted from standard/build_pdf.py — regenerate: cd standard && python build_pdf.py"; exit 1; }
+
+  goreleaser-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: check
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: build --snapshot --clean
