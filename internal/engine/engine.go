@@ -217,6 +217,13 @@ func fetchDocs(client *httpx.Client, surfaceURL string, paths []string, perCheck
 				continue
 			}
 			full := base.ResolveReference(ref).String()
+			// Declared paths are SAME-ORIGIN only. A path like "//evil.com/x" or an
+			// absolute off-host/HTTP URL must not be fetched as if it were the
+			// surface — that would let a manifest author poison the worst-case
+			// static analysis (and the signed record) with a foreign origin.
+			if !sameOrigin(base, full) {
+				continue
+			}
 			if !seen[full] {
 				seen[full] = true
 				targets = append(targets, full)
@@ -232,11 +239,26 @@ func fetchDocs(client *httpx.Client, surfaceURL string, paths []string, perCheck
 	return docs
 }
 
-// fetchWithRetry retries a transient fetch failure within the per-check budget so
-// a single network blip doesn't turn the whole gate red.
+// sameOrigin reports whether raw has the same scheme+host(+port) as base.
+func sameOrigin(base *url.URL, raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	return u.Scheme == base.Scheme && strings.EqualFold(u.Host, base.Host)
+}
+
+// fetchWithRetry retries a transient fetch failure so a single network blip
+// doesn't turn the whole gate red — but all attempts share ONE perCheck budget,
+// so a black-holed host can't multiply latency to attempts×perCheck.
 func fetchWithRetry(client *httpx.Client, target string, perCheck time.Duration, attempts int) *httpx.Doc {
+	deadline := time.Now().Add(perCheck)
 	for i := 0; i < attempts; i++ {
-		ctx, cancel := context.WithTimeout(context.Background(), perCheck)
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			break
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), remaining)
 		d, err := client.Fetch(ctx, target)
 		cancel()
 		if err == nil {

@@ -2,6 +2,7 @@ package rules
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -124,17 +125,16 @@ func chkLeastPriv(_ context.Context, c *CheckCtx) Outcome {
 		if permScalar(wf.Permissions) == "write-all" {
 			return bad("top-level permissions: write-all in "+name, "scope write to the job that needs it")
 		}
-		if present(wf.Permissions) {
-			continue // top-level scoped permissions cover all jobs
-		}
-		// No top-level block: each job must scope its own.
+		topPresent := present(wf.Permissions)
+		// A top-level block does NOT excuse a job that escalates to write-all: job
+		// permissions override the top-level for that job, so always inspect them.
 		for jn, job := range wf.Jobs {
-			if !present(job.Permissions) {
-				return bad("job "+jn+" in "+name+" has no permissions and no top-level default",
-					"declare top-level permissions, or scope each job")
-			}
 			if permScalar(job.Permissions) == "write-all" {
 				return bad("job "+jn+" in "+name+" uses permissions: write-all", "scope write to what the job needs")
+			}
+			if !topPresent && !present(job.Permissions) {
+				return bad("job "+jn+" in "+name+" has no permissions and no top-level default",
+					"declare top-level permissions, or scope each job")
 			}
 		}
 	}
@@ -158,12 +158,16 @@ func chkNoUntrustedPriv(_ context.Context, c *CheckCtx) Outcome {
 		}
 		for jn, job := range wf.Jobs {
 			for _, st := range job.Steps {
-				if !strings.HasPrefix(strings.TrimSpace(st.Uses), "actions/checkout") {
+				if !isCheckoutAction(st.Uses) {
 					continue
 				}
-				ref, _ := st.With["ref"].(string)
-				if refIsUntrusted(ref) {
-					return bad("privileged "+name+" job "+jn+" checks out untrusted ref \""+ref+"\"",
+				ref, repo := withString(st.With, "ref"), withString(st.With, "repository")
+				if refIsUntrusted(ref) || refIsUntrusted(repo) {
+					val := ref
+					if val == "" {
+						val = repo
+					}
+					return bad("privileged "+name+" job "+jn+" checks out untrusted code (\""+val+"\")",
 						"never build untrusted PR code with elevated tokens")
 				}
 			}
@@ -191,10 +195,27 @@ func workflowEvents(on yaml.Node) map[string]bool {
 	return out
 }
 
+// isCheckoutAction matches actions/checkout exactly (or a subdir action under
+// it), not a typosquat like actions/checkout-evil.
+func isCheckoutAction(uses string) bool {
+	at := strings.SplitN(strings.TrimSpace(uses), "@", 2)[0]
+	return at == "actions/checkout" || strings.HasPrefix(at, "actions/checkout/")
+}
+
+// withString reads a `with:` value as a string, coercing non-string scalars
+// (a YAML ref decoded as a number/bool still becomes text we can scan).
+func withString(with map[string]any, key string) string {
+	if v, ok := with[key]; ok && v != nil {
+		return fmt.Sprint(v)
+	}
+	return ""
+}
+
 func refIsUntrusted(ref string) bool {
 	r := strings.ToLower(ref)
 	for _, marker := range []string{
-		"pull_request.head", "head.sha", "head.ref", "workflow_run.head",
+		"pull_request.head", "head.sha", "head.ref", "head_ref", // covers github.head_ref
+		"workflow_run.head", "refs/pull/", "event.number",
 	} {
 		if strings.Contains(r, marker) {
 			return true
@@ -207,8 +228,8 @@ func isSHA40(s string) bool {
 	if len(s) != 40 {
 		return false
 	}
-	for _, r := range s {
-		if !(r >= '0' && r <= '9' || r >= 'a' && r <= 'f') {
+	for _, r := range s { // commit SHAs are valid in upper or lower hex
+		if !(r >= '0' && r <= '9' || r >= 'a' && r <= 'f' || r >= 'A' && r <= 'F') {
 			return false
 		}
 	}

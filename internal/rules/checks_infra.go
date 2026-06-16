@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -140,22 +141,28 @@ func chkDangling(_ context.Context, c *CheckCtx) Outcome {
 	if a.Rcode == dns.RcodeNameError || len(a.Answer) == 0 {
 		return bad("CNAME -> "+target+" does not resolve (dangling)", "every CNAME target resolves")
 	}
-	// 2) Target resolves but may be unclaimed: match the live body fingerprint.
+	// 2) The target resolves. Only a takeover-PRONE provider warrants a body
+	// fingerprint check — otherwise a benign page that merely contains a phrase
+	// like "project not found" must not fail this MUST.
+	prov, prone := takeoverProvider(target)
+	if !prone {
+		return okay("CNAME -> "+target+" resolves (not a takeover-prone provider)", "")
+	}
 	body := ""
 	if c.Doc != nil {
 		body = string(c.Doc.Body)
 	}
-	if sig, matched := takeoverFingerprint(body); matched {
-		return bad("CNAME -> "+target+" serves an unclaimed-resource fingerprint: "+sig,
-			"CNAME target is a claimed, serving resource")
-	}
-	// 3) Resolves, on a takeover-prone provider, but we have no body to confirm it
-	// is claimed -> fail-closed INCONCLUSIVE rather than a silent PASS.
-	if prov, ok := takeoverProvider(target); ok && body == "" {
+	if body == "" {
+		// On a prone provider with no body to confirm the resource is claimed,
+		// fail closed to INCONCLUSIVE rather than a silent PASS.
 		return inconclusive("CNAME -> " + target + " points at " + prov +
 			" (takeover-prone) and the surface body is unavailable to confirm it is claimed")
 	}
-	return okay("CNAME -> "+target+" resolves; no takeover fingerprint", "")
+	if sig, matched := takeoverFingerprint(body); matched {
+		return bad("CNAME -> "+target+" ("+prov+") serves an unclaimed-resource fingerprint: "+sig,
+			"CNAME target is a claimed, serving resource")
+	}
+	return okay("CNAME -> "+target+" ("+prov+") resolves and serves no takeover fingerprint", "")
 }
 
 // takeoverProvider reports whether target is hosted on a provider where an
@@ -214,45 +221,48 @@ var takeoverFingerprints = []string{
 	"Sorry, this shop is currently unavailable",                             // Shopify
 	"Whatever you were looking for doesn't currently exist at this address", // Tumblr
 	"Site not found · Netlify",
-	"project not found", // Surge
 	"This UserVoice subdomain is currently available",
 	"Do you want to register *.wordpress.com",
-	"Repository not found", // Bitbucket/GitHub Pages-style
+	"Repository not found · Bitbucket", // full Bitbucket marker (not the bare phrase)
 }
 
+// hostOnly extracts the lowercased host from a URL (or a scheme-less authority),
+// correctly unwrapping IPv6 literals like [::1]. net/url does the bracket-aware
+// parsing the previous hand-rolled colon-splitting got wrong.
 func hostOnly(raw string) string {
 	raw = strings.TrimSpace(raw)
-	if i := strings.Index(raw, "://"); i >= 0 {
-		raw = raw[i+3:]
-	}
-	if i := strings.IndexAny(raw, "/?#"); i >= 0 {
-		raw = raw[:i]
-	}
-	if i := strings.Index(raw, ":"); i >= 0 {
-		raw = raw[:i]
-	}
-	return strings.ToLower(raw)
-}
-
-// surfaceAddr returns host:port for the surface URL, defaulting to :443.
-func surfaceAddr(raw string) string {
-	h := hostOnly(raw)
-	if h == "" {
+	if raw == "" {
 		return ""
 	}
-	rest := strings.TrimSpace(raw)
-	if i := strings.Index(rest, "://"); i >= 0 {
-		rest = rest[i+3:]
+	if !strings.Contains(raw, "://") {
+		raw = "//" + raw // treat a bare authority (host[:port][/path]) as host-relative
 	}
-	if i := strings.IndexAny(rest, "/?#"); i >= 0 {
-		rest = rest[:i]
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
 	}
-	if i := strings.LastIndex(rest, ":"); i >= 0 {
-		if port := rest[i+1:]; port != "" {
-			return net.JoinHostPort(h, port)
-		}
+	return strings.ToLower(u.Hostname())
+}
+
+// surfaceAddr returns host:port for the surface URL, defaulting to :443. IPv6
+// literals are re-bracketed by net.JoinHostPort.
+func surfaceAddr(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
 	}
-	return net.JoinHostPort(h, "443")
+	if !strings.Contains(raw, "://") {
+		raw = "//" + raw
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Hostname() == "" {
+		return ""
+	}
+	port := u.Port()
+	if port == "" {
+		port = "443"
+	}
+	return net.JoinHostPort(u.Hostname(), port)
 }
 
 // AG-HDR-08: TLS floor — legacy TLS (1.0/1.1) MUST be refused; 1.2+ MUST work.
@@ -268,12 +278,13 @@ func chkTLSFloor(_ context.Context, c *CheckCtx) Outcome {
 	if host == "" || addr == "" {
 		return inconclusive("cannot derive surface host")
 	}
-	accepted, reachable := offersLegacyTLS(addr, host, 6*time.Second)
-	if !reachable {
-		return inconclusive("cannot reach " + addr + " for TLS probe")
-	}
+	accepted, conclusive := offersLegacyTLS(addr, host, 6*time.Second)
 	if accepted {
 		return bad("legacy TLS (1.0/1.1) accepted", "TLS 1.0/1.1 refused")
+	}
+	if !conclusive {
+		return inconclusive("legacy-TLS refusal not provable for " + addr +
+			" (unreachable, or the server answered with a non-version error); cannot conclude the floor")
 	}
 	// Confirm 1.2+ actually works. We only assert the version floor here, not the
 	// PKI (certificate validity is out of scope for this rule), so trust is skipped.
@@ -289,24 +300,39 @@ func chkTLSFloor(_ context.Context, c *CheckCtx) Outcome {
 
 // ---------- supply chain ----------
 
-// lockfiles maps a known lockfile to the substring that proves it pins
-// dependencies by integrity hash. An empty marker means the file IS the hash set
-// (e.g. go.sum), so its presence alone proves pinning.
-var lockfiles = []struct{ name, marker string }{
-	{"package-lock.json", `"integrity"`},
-	{"npm-shrinkwrap.json", `"integrity"`},
-	{"yarn.lock", "integrity "},
-	{"pnpm-lock.yaml", "integrity:"},
-	{"Cargo.lock", "checksum = "},
-	{"go.sum", ""},
-	{"poetry.lock", "hash"},
-	{"Pipfile.lock", `"hashes"`},
-	{"composer.lock", "shasum"},
+// lockfiles maps a known lockfile to the substrings that prove it pins
+// dependencies by integrity hash (ANY one suffices — e.g. yarn classic uses
+// "integrity ", yarn berry uses "checksum:"). A nil markers slice means the file
+// IS the hash set (go.sum), so a non-empty file proves pinning. Markers are
+// chosen to match a per-dependency hash, never a lockfile-wide digest (poetry's
+// content-hash, composer's empty shasum) which would be a constant-true false PASS.
+var lockfiles = []struct {
+	name    string
+	markers []string
+}{
+	{"package-lock.json", []string{`"integrity"`}},
+	{"npm-shrinkwrap.json", []string{`"integrity"`}},
+	{"yarn.lock", []string{"integrity ", "checksum:"}}, // classic + berry
+	{"pnpm-lock.yaml", []string{"integrity:"}},
+	{"Cargo.lock", []string{"checksum = "}},
+	{"go.sum", nil},
+	{"poetry.lock", []string{"sha256:"}},  // per-file hash, not content-hash
+	{"Pipfile.lock", []string{"sha256:"}}, // hashes list, not the _meta digest
+}
+
+func containsAny(b []byte, subs []string) bool {
+	for _, s := range subs {
+		if bytes.Contains(b, []byte(s)) {
+			return true
+		}
+	}
+	return false
 }
 
 // AG-SUP-02: dependencies are pinned by integrity hash. We audit the recognised
-// lockfiles present in the repo: each must carry integrity hashes. No recognised
-// lockfile -> INCONCLUSIVE (fail-closed, nothing to prove against).
+// lockfiles present in the repo: each must carry per-dependency integrity hashes.
+// No recognised lockfile (or only an empty go.sum) -> INCONCLUSIVE (fail-closed,
+// nothing to prove against), never a silent PASS.
 func chkPinnedDeps(_ context.Context, c *CheckCtx) Outcome {
 	var audited, unpinned []string
 	for _, lf := range lockfiles {
@@ -314,13 +340,20 @@ func chkPinnedDeps(_ context.Context, c *CheckCtx) Outcome {
 		if err != nil {
 			continue
 		}
+		if len(lf.markers) == 0 { // go.sum: only a populated file proves anything
+			if len(bytes.TrimSpace(b)) == 0 {
+				continue // empty -> audited nothing
+			}
+			audited = append(audited, lf.name)
+			continue
+		}
 		audited = append(audited, lf.name)
-		if lf.marker != "" && !bytes.Contains(b, []byte(lf.marker)) {
+		if !containsAny(b, lf.markers) {
 			unpinned = append(unpinned, lf.name)
 		}
 	}
 	if len(audited) == 0 {
-		return inconclusive("no recognised lockfile to audit for integrity hashes")
+		return inconclusive("no recognised, populated lockfile to audit for integrity hashes")
 	}
 	if len(unpinned) > 0 {
 		return bad("lockfile(s) without integrity hashes: "+strings.Join(unpinned, ", "),
@@ -408,6 +441,9 @@ func parseOSVResults(jsonOut []byte) (count int, ids []string, ok bool) {
 				Vulnerabilities []struct {
 					ID string `json:"id"`
 				} `json:"vulnerabilities"`
+				Groups []struct {
+					IDs []string `json:"ids"`
+				} `json:"groups"`
 			} `json:"packages"`
 		} `json:"results"`
 	}
@@ -415,12 +451,20 @@ func parseOSVResults(jsonOut []byte) (count int, ids []string, ok bool) {
 		return 0, nil, false
 	}
 	seen := map[string]bool{}
+	add := func(id string) {
+		if id != "" && !seen[id] {
+			seen[id] = true
+			ids = append(ids, id)
+		}
+	}
 	for _, r := range doc.Results {
 		for _, p := range r.Packages {
 			for _, v := range p.Vulnerabilities {
-				if v.ID != "" && !seen[v.ID] {
-					seen[v.ID] = true
-					ids = append(ids, v.ID)
+				add(v.ID)
+			}
+			for _, g := range p.Groups { // modern osv-scanner reports IDs here too
+				for _, id := range g.IDs {
+					add(id)
 				}
 			}
 		}

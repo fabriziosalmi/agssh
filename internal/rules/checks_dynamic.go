@@ -258,11 +258,17 @@ func serviceWorkerVerdict(self string, regs []swReg) Outcome {
 type storageObs struct {
 	Local   []string `json:"local"`
 	Session []string `json:"session"`
-	Cookies []string `json:"cookies"`
 }
 
-const storageJS = `JSON.stringify({local:Object.keys(localStorage), session:Object.keys(sessionStorage),` +
-	`cookies: document.cookie ? document.cookie.split(';').map(function(c){return c.split('=')[0].trim();}) : []})`
+// storageJS enumerates ONLY localStorage/sessionStorage. Cookies are excluded on
+// purpose: document.cookie reports server-set (Set-Cookie) cookies that the page
+// author didn't choose as client storage, and never the HttpOnly ones — cookie
+// hardening is AG-PRV-05's job, not AG-PRV-04's. Accessors are wrapped so a
+// SecurityError in a storage-disabled/opaque context yields empty, not a throw.
+const storageJS = `(function(){var r={local:[],session:[]};` +
+	`try{r.local=Object.keys(localStorage)}catch(e){}` +
+	`try{r.session=Object.keys(sessionStorage)}catch(e){}` +
+	`return JSON.stringify(r);})()`
 
 // AG-PRV-04: client storage is minimized to the declared allow-list.
 func chkClientStorage(ctx context.Context, c *CheckCtx) Outcome {
@@ -287,7 +293,7 @@ func storageVerdict(allow []string, obs storageObs) Outcome {
 	}
 	seen := map[string]bool{}
 	var offenders []string
-	for _, group := range [][]string{obs.Local, obs.Session, obs.Cookies} {
+	for _, group := range [][]string{obs.Local, obs.Session} {
 		for _, k := range group {
 			if k == "" || permitted[k] || seen[k] {
 				continue
@@ -300,6 +306,6 @@ func storageVerdict(allow []string, obs storageObs) Outcome {
 		return bad("client-storage keys outside the allow-list: "+strings.Join(offenders, ", "),
 			"only declared allow.storage keys persisted")
 	}
-	total := len(obs.Local) + len(obs.Session) + len(obs.Cookies)
+	total := len(obs.Local) + len(obs.Session)
 	return okay(fmt.Sprintf("%d client-storage key(s), all allow-listed", total), "")
 }

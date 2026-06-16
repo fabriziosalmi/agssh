@@ -55,23 +55,35 @@ func evalBranchProtection(branch string, status int, body []byte) Outcome {
 		RequiredStatusChecks *struct {
 			Strict   bool     `json:"strict"`
 			Contexts []string `json:"contexts"`
+			// Modern GitHub returns required checks here; `contexts` can be empty
+			// while `checks` is populated, so we must read both or false-FAIL.
+			Checks []struct {
+				Context string `json:"context"`
+			} `json:"checks"`
 		} `json:"required_status_checks"`
 	}
 	if err := json.Unmarshal(body, &p); err != nil {
 		return inconclusive("branch-protection response not parseable: " + err.Error())
 	}
 	var missing []string
-	if p.RequiredPullRequestReviews == nil {
-		missing = append(missing, "required PR reviews")
+	if p.RequiredPullRequestReviews == nil || p.RequiredPullRequestReviews.RequiredApprovingReviewCount < 1 {
+		missing = append(missing, "required PR reviews (>=1 approval)")
 	}
-	if p.RequiredStatusChecks == nil || len(p.RequiredStatusChecks.Contexts) == 0 {
+	nChecks := 0
+	if p.RequiredStatusChecks != nil {
+		nChecks = len(p.RequiredStatusChecks.Contexts)
+		if c := len(p.RequiredStatusChecks.Checks); c > nChecks {
+			nChecks = c
+		}
+	}
+	if nChecks == 0 {
 		missing = append(missing, "required status checks")
 	}
 	if len(missing) > 0 {
 		return bad("branch "+branch+" protected but missing: "+strings.Join(missing, ", "),
-			"required PR reviews + at least one required status check")
+			"required PR reviews (>=1) + at least one required status check")
 	}
-	return okay(fmt.Sprintf("branch %s protected: PR reviews + %d required check(s)", branch, len(p.RequiredStatusChecks.Contexts)), "")
+	return okay(fmt.Sprintf("branch %s protected: PR reviews + %d required check(s)", branch, nChecks), "")
 }
 
 // githubSlug resolves owner/repo from GITHUB_REPOSITORY (set in Actions) or the

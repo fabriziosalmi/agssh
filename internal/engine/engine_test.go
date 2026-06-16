@@ -87,6 +87,24 @@ func TestGateTruthTable(t *testing.T) {
 	}
 }
 
+// TestGateAnyPositionBlocks pins the "ANY failing result blocks" contract with
+// multi-element slices and hardcoded expectations (not a formula), killing a
+// "check only results[0]" mutant that the single-element table would miss.
+func TestGateAnyPositionBlocks(t *testing.T) {
+	pass := res(rules.Should, rules.Low, rules.Pass, false)
+	failUnwaived := res(rules.Must, rules.Critical, rules.Fail, false)
+
+	if gate([]rules.Result{pass, pass, failUnwaived}, nil) {
+		t.Error("an unwaived FAIL in the LAST position must block")
+	}
+	if gate([]rules.Result{failUnwaived, pass}, nil) {
+		t.Error("an unwaived FAIL in the FIRST position must block")
+	}
+	if !gate([]rules.Result{pass, pass, pass}, nil) {
+		t.Error("all PASS must be conformant")
+	}
+}
+
 func TestGateInconclusiveIsFailClosed(t *testing.T) {
 	if gate([]rules.Result{res(rules.Should, rules.Low, rules.Inconclusive, false)}, nil) {
 		t.Fatal("a single unwaived INCONCLUSIVE must block the gate (fail-closed)")

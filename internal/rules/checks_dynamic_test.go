@@ -64,9 +64,9 @@ func TestStorageVerdict(t *testing.T) {
 	if storageVerdict(allow, storageObs{Local: []string{"theme"}}).Status != Pass {
 		t.Error("allow-listed key only: want PASS")
 	}
-	out := storageVerdict(allow, storageObs{Local: []string{"theme"}, Cookies: []string{"session_token"}})
-	if out.Status != Fail || !strings.Contains(out.Evidence.Observed, "session_token") {
-		t.Errorf("undeclared key: want FAIL naming session_token, got %s / %q", out.Status, out.Evidence.Observed)
+	out := storageVerdict(allow, storageObs{Local: []string{"theme"}, Session: []string{"redux_token"}})
+	if out.Status != Fail || !strings.Contains(out.Evidence.Observed, "redux_token") {
+		t.Errorf("undeclared key: want FAIL naming redux_token, got %s / %q", out.Status, out.Evidence.Observed)
 	}
 	if storageVerdict(nil, storageObs{}).Status != Pass {
 		t.Error("no storage at all: want PASS")
