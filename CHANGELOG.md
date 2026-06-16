@@ -25,6 +25,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **AG-SUP-02 is now implemented**: audits the recognised lockfiles present
   (npm/yarn/pnpm/Cargo/go.sum/poetry/Pipfile/composer) for integrity hashes. No
   recognised lockfile → INCONCLUSIVE (fail-closed). (#9)
+- **AG-CI-05 is now implemented**: verifies the default branch is protected
+  (required PR reviews + ≥1 required status check) via the GitHub API. Owner/repo
+  from `GITHUB_REPOSITORY` or the `github.com` remote; without a token →
+  INCONCLUSIVE, never a silent PASS. The verdict logic is a pure, fully-tested
+  function. (#9)
 - **Multi-path surfaces**: a surface may declare extra `paths:`; static
   header/CSP checks are evaluated **worst-case** across the root + every path, and
   fetches now retry transient failures within the per-check budget. (#7)
