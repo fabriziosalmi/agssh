@@ -30,6 +30,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   from `GITHUB_REPOSITORY` or the `github.com` remote; without a token →
   INCONCLUSIVE, never a silent PASS. The verdict logic is a pure, fully-tested
   function. (#9)
+- **Dynamic plane: AG-NET-07 and AG-PRV-04 implemented.** Service-worker hygiene
+  (every registration's script and scope must be same-origin) and client-storage
+  minimization (localStorage/sessionStorage/cookie keys must be within
+  `allow.storage`). Each dynamic check is split into thin headless-browser
+  observation + a **pure, hermetically-tested verdict** (offline-proof,
+  pre-consent, egress-canary, service-worker, storage); a skip-guarded
+  integration test drives a real browser when one is resolvable. (#9)
 - **Multi-path surfaces**: a surface may declare extra `paths:`; static
   header/CSP checks are evaluated **worst-case** across the root + every path, and
   fetches now retry transient failures within the per-check budget. (#7)

@@ -15,7 +15,7 @@ func All() []Rule {
 		{"AG-NET-04", "Constrain connect-src", "AG-NET", Must, Critical, B, PlaneStatic, always, chkConnectSrc},
 		{"AG-NET-05", "Prove offline operation", "AG-NET", Must, High, S, PlaneDynamic, always, chkOfflineProof},
 		{"AG-NET-06", "No third-party connection priming", "AG-NET", Must, Medium, S, PlaneStatic, always, chkNoPriming},
-		{"AG-NET-07", "Service Worker hygiene", "AG-NET", Must, High, S, PlaneDynamic, ifServiceWorker, todo("inspect registered SW scope and fetch handler")},
+		{"AG-NET-07", "Service Worker hygiene", "AG-NET", Must, High, S, PlaneDynamic, ifServiceWorker, chkServiceWorker},
 		{"AG-NET-08", "Violation/error reporting stays same-origin", "AG-NET", Must, Medium, S, PlaneStatic, always, chkReportSameOrigin},
 		{"AG-NET-09", "External _blank links sever the opener; privacy surfaces sever the referrer", "AG-NET", Must, Medium, B, PlaneStatic, always, chkNoopener},
 
@@ -65,7 +65,7 @@ func All() []Rule {
 		{"AG-PRV-01", "Zero telemetry by default", "AG-PRV", Must, Critical, B, PlaneStatic, atLevels(manifest.L0, manifest.L1), chkZeroTelemetry},
 		{"AG-PRV-02", "No pre-consent egress", "AG-PRV", Must, Critical, B, PlaneDynamic, always, chkPreConsentEgress},
 		{"AG-PRV-03", "Self-host fonts", "AG-PRV", Must, High, B, PlaneStatic, always, chkSelfHostFonts},
-		{"AG-PRV-04", "Minimize client storage", "AG-PRV", Must, Medium, S, PlaneDynamic, always, todo("enumerate storage at runtime vs allow-list")},
+		{"AG-PRV-04", "Minimize client storage", "AG-PRV", Must, Medium, S, PlaneDynamic, always, chkClientStorage},
 		{"AG-PRV-05", "Cookie attributes hardened", "AG-PRV", Must, High, S, PlaneStatic, always, chkCookieAttrs},
 		{"AG-PRV-06", "Third-party embeds sandboxed", "AG-PRV", Must, Medium, S, PlaneStatic, always, chkEmbedsSandboxed},
 

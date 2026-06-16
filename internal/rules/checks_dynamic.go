@@ -2,11 +2,14 @@ package rules
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/chromedp/cdproto/network"
+	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
 )
 
@@ -50,11 +53,14 @@ func (o *netObs) on(ev interface{}) {
 	}
 }
 
-func (o *netObs) respondedHosts() []string {
+func (o *netObs) respondedHosts() []string { return o.hosts(o.responded) }
+func (o *netObs) requestedHosts() []string { return o.hosts(o.requested) }
+
+func (o *netObs) hosts(set map[string]bool) []string {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	var hs []string
-	for h := range o.responded {
+	for h := range set {
 		hs = append(hs, h)
 	}
 	return hs
@@ -112,9 +118,13 @@ func chkOfflineProof(ctx context.Context, c *CheckCtx) Outcome {
 	if err != nil {
 		return inconclusive("headless load failed: " + err.Error())
 	}
-	self := hostOnly(c.Surface.URL)
+	return offlineProofVerdict(hostOnly(c.Surface.URL), obs.respondedHosts())
+}
+
+// offlineProofVerdict fails if any responded host is third-party.
+func offlineProofVerdict(self string, responded []string) Outcome {
 	var third []string
-	for _, h := range obs.respondedHosts() {
+	for _, h := range responded {
 		if h == "" || h == self {
 			continue
 		}
@@ -135,9 +145,12 @@ func chkPreConsentEgress(ctx context.Context, c *CheckCtx) Outcome {
 	if err != nil {
 		return inconclusive("headless load failed: " + err.Error())
 	}
-	obs.mu.Lock()
-	defer obs.mu.Unlock()
-	for h := range obs.requested {
+	return preConsentVerdict(obs.requestedHosts())
+}
+
+// preConsentVerdict fails if any requested host is a known tracker.
+func preConsentVerdict(requested []string) Outcome {
+	for _, h := range requested {
 		if t, hit := hostSuffixIn(h, trackerHosts); hit {
 			return bad("tracker contacted pre-consent: "+t, "no analytics/tracker egress before consent")
 		}
@@ -156,10 +169,14 @@ func chkEgressCanary(ctx context.Context, c *CheckCtx) Outcome {
 		return inconclusive("headless canary run failed: " + err.Error())
 	}
 	obs.mu.Lock()
-	attempted := obs.requested[canaryHost]
-	got := obs.responded[canaryHost]
+	attempted, got := obs.requested[canaryHost], obs.responded[canaryHost]
 	obs.mu.Unlock()
-	if got {
+	return egressCanaryVerdict(attempted, got)
+}
+
+// egressCanaryVerdict: a response to the canary means the egress wall is down.
+func egressCanaryVerdict(attempted, responded bool) Outcome {
+	if responded {
 		return Outcome{Status: Fail, Evidence: Evidence{
 			Observed: "canary probe to " + canaryHost + " received a response",
 			Expected: "CSP blocks the probe (no response)",
@@ -168,4 +185,121 @@ func chkEgressCanary(ctx context.Context, c *CheckCtx) Outcome {
 	return Outcome{Status: Pass, Evidence: Evidence{
 		Observed: "canary probe blocked (no response from " + canaryHost + ")",
 		Detail:   map[string]any{"attempted": attempted, "responded": false}}}
+}
+
+// browseEval loads url in headless Chrome and returns the JSON string produced by
+// js (which must itself JSON.stringify its result). await=true unwraps a Promise.
+func browseEval(parent context.Context, chromePath, url, js string, settle time.Duration, await bool) (string, error) {
+	opts := append([]chromedp.ExecAllocatorOption{}, chromedp.DefaultExecAllocatorOptions[:]...)
+	opts = append(opts, chromedp.Headless, chromedp.DisableGPU, chromedp.NoSandbox)
+	if chromePath != "" {
+		opts = append(opts, chromedp.ExecPath(chromePath))
+	}
+	allocCtx, cancelA := chromedp.NewExecAllocator(parent, opts...)
+	defer cancelA()
+	ctx, cancel := chromedp.NewContext(allocCtx)
+	defer cancel()
+	ctx, cancelT := context.WithTimeout(ctx, 30*time.Second)
+	defer cancelT()
+
+	var out string
+	var eval chromedp.Action
+	if await {
+		eval = chromedp.Evaluate(js, &out, func(p *runtime.EvaluateParams) *runtime.EvaluateParams {
+			return p.WithAwaitPromise(true)
+		})
+	} else {
+		eval = chromedp.Evaluate(js, &out)
+	}
+	err := chromedp.Run(ctx, chromedp.Navigate(url), chromedp.Sleep(settle), eval)
+	return out, err
+}
+
+type swReg struct {
+	Scope  string `json:"scope"`
+	Script string `json:"script"`
+}
+
+const serviceWorkerJS = `(navigator.serviceWorker ? navigator.serviceWorker.getRegistrations().then(function(rs){` +
+	`return JSON.stringify(rs.map(function(r){var w=r.active||r.waiting||r.installing||{};` +
+	`return {scope:r.scope||'', script:w.scriptURL||''};}));}) : "[]")`
+
+// AG-NET-07: a registered Service Worker is same-origin (script and scope).
+func chkServiceWorker(ctx context.Context, c *CheckCtx) Outcome {
+	if c.Tools.Chrome == "" {
+		return inconclusive("no Chrome/Chromium for service-worker inspection")
+	}
+	out, err := browseEval(ctx, c.Tools.Chrome, c.Surface.URL, serviceWorkerJS, 3*time.Second, true)
+	if err != nil {
+		return inconclusive("headless service-worker inspection failed: " + err.Error())
+	}
+	var regs []swReg
+	if e := json.Unmarshal([]byte(out), &regs); e != nil {
+		return inconclusive("could not parse service-worker registrations: " + e.Error())
+	}
+	return serviceWorkerVerdict(hostOnly(c.Surface.URL), regs)
+}
+
+func serviceWorkerVerdict(self string, regs []swReg) Outcome {
+	if len(regs) == 0 {
+		return inconclusive("surface declares a service worker but none was registered at load")
+	}
+	for _, r := range regs {
+		if r.Script != "" && hostOnly(r.Script) != self {
+			return bad("service-worker script is cross-origin: "+r.Script, "same-origin service-worker script")
+		}
+		if r.Scope != "" && hostOnly(r.Scope) != self {
+			return bad("service-worker scope is cross-origin: "+r.Scope, "same-origin service-worker scope")
+		}
+	}
+	return okay(fmt.Sprintf("%d service worker(s), all same-origin", len(regs)), "")
+}
+
+type storageObs struct {
+	Local   []string `json:"local"`
+	Session []string `json:"session"`
+	Cookies []string `json:"cookies"`
+}
+
+const storageJS = `JSON.stringify({local:Object.keys(localStorage), session:Object.keys(sessionStorage),` +
+	`cookies: document.cookie ? document.cookie.split(';').map(function(c){return c.split('=')[0].trim();}) : []})`
+
+// AG-PRV-04: client storage is minimized to the declared allow-list.
+func chkClientStorage(ctx context.Context, c *CheckCtx) Outcome {
+	if c.Tools.Chrome == "" {
+		return inconclusive("no Chrome/Chromium for client-storage inspection")
+	}
+	out, err := browseEval(ctx, c.Tools.Chrome, c.Surface.URL, storageJS, 3*time.Second, false)
+	if err != nil {
+		return inconclusive("headless client-storage inspection failed: " + err.Error())
+	}
+	var obs storageObs
+	if e := json.Unmarshal([]byte(out), &obs); e != nil {
+		return inconclusive("could not parse client storage: " + e.Error())
+	}
+	return storageVerdict(c.Allow.Storage, obs)
+}
+
+func storageVerdict(allow []string, obs storageObs) Outcome {
+	permitted := map[string]bool{}
+	for _, k := range allow {
+		permitted[k] = true
+	}
+	seen := map[string]bool{}
+	var offenders []string
+	for _, group := range [][]string{obs.Local, obs.Session, obs.Cookies} {
+		for _, k := range group {
+			if k == "" || permitted[k] || seen[k] {
+				continue
+			}
+			seen[k] = true
+			offenders = append(offenders, k)
+		}
+	}
+	if len(offenders) > 0 {
+		return bad("client-storage keys outside the allow-list: "+strings.Join(offenders, ", "),
+			"only declared allow.storage keys persisted")
+	}
+	total := len(obs.Local) + len(obs.Session) + len(obs.Cookies)
+	return okay(fmt.Sprintf("%d client-storage key(s), all allow-listed", total), "")
 }
