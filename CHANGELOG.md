@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.1.0] — 2026-06-16
+
 ### Fixed (adversarial review pass)
 - **TLS floor false-PASS, take 2.** The probe offered only CBC-SHA1 suites, so an
   AEAD/ChaCha-only-but-TLS-1.0-permitting server answered `handshake_failure` and
@@ -104,5 +106,6 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - CI: build, `go vet`, `gofmt`, `go test -race`, spec↔runner skew enforcement, and
   a goreleaser release pipeline.
 
-[Unreleased]: https://github.com/fabriziosalmi/agssh/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/fabriziosalmi/agssh/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/fabriziosalmi/agssh/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/fabriziosalmi/agssh/releases/tag/v1.0.0
