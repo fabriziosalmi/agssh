@@ -77,6 +77,9 @@ var (
 // ---------- CSP / egress ----------
 
 // AG-NET-01: every fetch-directive except connect-src is first-party only.
+// A directive that is neither explicitly set nor covered by default-src is a
+// leak too — the browser's initial value for most fetch-directives is wide
+// open (*), so "unset" is not "safe". connect-src is scoped by AG-NET-04.
 func chkSelfHostAll(_ context.Context, c *CheckCtx) Outcome {
 	if c.Doc == nil {
 		return inconclusive("surface not fetched")
@@ -90,7 +93,12 @@ func chkSelfHostAll(_ context.Context, c *CheckCtx) Outcome {
 		if d == "connect-src" {
 			continue // governed by AG-NET-04
 		}
-		if vals, ok := pol.Effective(d); ok && !csp.SelfOnly(vals) {
+		vals, ok := pol.Effective(d)
+		if !ok {
+			leaks = append(leaks, d+" (unset, no default-src)")
+			continue
+		}
+		if !csp.SelfOnly(vals) {
 			leaks = append(leaks, d)
 		}
 	}

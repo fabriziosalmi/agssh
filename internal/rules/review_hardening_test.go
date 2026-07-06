@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/fabriziosalmi/agssh/internal/manifest"
@@ -219,6 +220,20 @@ func TestChkNoUntrustedPrivPatterns(t *testing.T) {
 
 func cspDoc(policy string) *CheckCtx {
 	return &CheckCtx{Doc: newDoc(200, "", map[string]string{"Content-Security-Policy": policy})}
+}
+
+// AG-NET-01 must reject a policy that only scopes some directives and leaves
+// the rest wide open. `script-src 'self'` with no default-src leaves img-src,
+// font-src, media-src, etc. at the browser default (*), which is a leak.
+func TestChkSelfHostAllFlagsUnsetDirectives(t *testing.T) {
+	c := cspDoc("script-src 'self'")
+	out := chkSelfHostAll(t.Context(), c)
+	if out.Status != Fail {
+		t.Fatalf("script-src 'self' alone must FAIL (img-src etc. wide open), got %s", out.Status)
+	}
+	if !strings.Contains(out.Evidence.Observed, "img-src") {
+		t.Errorf("evidence should name the unset directives, got %q", out.Evidence.Observed)
+	}
 }
 
 func TestChkConnectSrcLevelGated(t *testing.T) {
