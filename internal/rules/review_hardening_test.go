@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/fabriziosalmi/agssh/internal/manifest"
@@ -219,6 +220,187 @@ func TestChkNoUntrustedPrivPatterns(t *testing.T) {
 
 func cspDoc(policy string) *CheckCtx {
 	return &CheckCtx{Doc: newDoc(200, "", map[string]string{"Content-Security-Policy": policy})}
+}
+
+// AG-NET-02: the rewrite must parse HTML instead of substring-matching. Cases
+// that used to be broken by the old regex-on-body approach:
+//   - prose mentioning "cdn.jsdelivr.net" (false positive) — must PASS
+//   - <script src=https://ajax.googleapis.com/...> (blocklist miss) — must FAIL
+//   - modulepreload cross-origin — must FAIL
+//   - image srcset cross-origin — must FAIL
+//   - allow.subresources at L1+ scopes the exemption to a named host
+func TestChkNoCDNLoadersEnumeratesHTML(t *testing.T) {
+	doc := func(body string) *CheckCtx {
+		return &CheckCtx{Doc: docFinal("https://me.test", body)}
+	}
+	// Prose match on the old regex, no subresource load — must PASS.
+	prose := `<p>Do not use cdn.jsdelivr.net for production assets.</p>`
+	if out := chkNoCDNLoaders(t.Context(), doc(prose)); out.Status != Pass {
+		t.Errorf("prose mention with no subresource load: got %s, want PASS", out.Status)
+	}
+	// External subresource NOT in the old regex — must now FAIL.
+	miss := `<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>`
+	if out := chkNoCDNLoaders(t.Context(), doc(miss)); out.Status != Fail {
+		t.Errorf("blocklist-missing CDN in a real <script src>: got %s, want FAIL", out.Status)
+	}
+	// modulepreload cross-origin — must FAIL.
+	mp := `<link rel="modulepreload" href="https://cdn.evil/x.mjs">`
+	if out := chkNoCDNLoaders(t.Context(), doc(mp)); out.Status != Fail {
+		t.Errorf("cross-origin modulepreload: got %s, want FAIL", out.Status)
+	}
+	// srcset with cross-origin URL — must FAIL.
+	srcset := `<img srcset="https://cdn.evil/small.png 1x, https://cdn.evil/big.png 2x">`
+	if out := chkNoCDNLoaders(t.Context(), doc(srcset)); out.Status != Fail {
+		t.Errorf("cross-origin srcset: got %s, want FAIL", out.Status)
+	}
+	// Same-origin subresource — must PASS.
+	same := `<script src="/assets/app.js"></script><img src="/logo.png">`
+	if out := chkNoCDNLoaders(t.Context(), doc(same)); out.Status != Pass {
+		t.Errorf("same-origin only: got %s, want PASS", out.Status)
+	}
+	// L1 with an explicit allow.subresources entry — the exempt host passes.
+	c := doc(`<script src="https://api.assets.example/app.js"></script>`)
+	c.Level = manifest.L1
+	c.Allow = manifest.Allow{Subresources: []string{"api.assets.example"}}
+	if out := chkNoCDNLoaders(t.Context(), c); out.Status != Pass {
+		t.Errorf("L1 allow.subresources exemption: got %s, want PASS", out.Status)
+	}
+	// L0 must ignore the allow-list — strict air-gap.
+	c.Level = manifest.L0
+	if out := chkNoCDNLoaders(t.Context(), c); out.Status != Fail {
+		t.Errorf("L0 must ignore allow.subresources: got %s, want FAIL", out.Status)
+	}
+}
+
+// AG-NET-09 must also cover <form target=_blank action="external">: form
+// submissions leak window.opener via the same HTML mechanism as <a>. And rel
+// must be tokenized (a rel value "notnoopener" must not falsely pass).
+func TestChkNoopenerCoversFormsAndTokenizesRel(t *testing.T) {
+	surf := func(body string) *CheckCtx {
+		return &CheckCtx{
+			Surface: manifest.Surface{URL: "https://me.test", Kind: "site"},
+			Doc:     docFinal("https://me.test", body),
+		}
+	}
+	// External form target=_blank without rel: fail.
+	form := `<form target="_blank" action="https://evil.example/x"></form>`
+	if out := chkNoopener(t.Context(), surf(form)); out.Status != Fail {
+		t.Errorf("external form target=_blank without rel: got %s, want FAIL", out.Status)
+	}
+	// External form target=_blank with rel=noopener: pass.
+	formOK := `<form target="_blank" rel="noopener" action="https://evil.example/x"></form>`
+	if out := chkNoopener(t.Context(), surf(formOK)); out.Status != Pass {
+		t.Errorf("form with rel=noopener: got %s, want PASS", out.Status)
+	}
+	// rel="notnoopener" (substring bug regression) — must FAIL, not pass.
+	trap := `<a target="_blank" rel="notnoopener" href="https://evil.example/x">x</a>`
+	if out := chkNoopener(t.Context(), surf(trap)); out.Status != Fail {
+		t.Errorf("rel=notnoopener must not satisfy the check: got %s, want FAIL", out.Status)
+	}
+}
+
+// AG-NET-08 must inspect Report-To / Reporting-Endpoints HEADERS, because the
+// CSP `report-to` directive carries GROUP NAMES that resolve via those
+// headers, not URLs. The old code treated group names as relative URLs and
+// silently missed cross-origin endpoints declared in the headers.
+func TestChkReportSameOriginParsesReportingHeaders(t *testing.T) {
+	// Reporting-Endpoints header names a cross-origin URL.
+	d := newDoc(200, "", map[string]string{
+		"Content-Security-Policy": "default-src 'none'; report-to csp-endpoint",
+	})
+	d.RequestURL, d.FinalURL = "https://me.test", "https://me.test"
+	d.Header.Add("Reporting-Endpoints", `csp-endpoint="https://collector.evil/csp"`)
+	if out := chkReportSameOrigin(t.Context(), &CheckCtx{Doc: d}); out.Status != Fail {
+		t.Errorf("Reporting-Endpoints cross-origin: got %s, want FAIL", out.Status)
+	}
+
+	// Legacy Report-To header (JSON groups) — cross-origin url inside endpoints.
+	d2 := newDoc(200, "", map[string]string{
+		"Content-Security-Policy": "default-src 'none'; report-to grp",
+	})
+	d2.RequestURL, d2.FinalURL = "https://me.test", "https://me.test"
+	d2.Header.Add("Report-To", `{"group":"grp","max_age":10886400,"endpoints":[{"url":"https://collector.evil/r"}]}`)
+	if out := chkReportSameOrigin(t.Context(), &CheckCtx{Doc: d2}); out.Status != Fail {
+		t.Errorf("Report-To JSON cross-origin: got %s, want FAIL", out.Status)
+	}
+
+	// Same-origin endpoint via Reporting-Endpoints: PASS.
+	d3 := newDoc(200, "", map[string]string{
+		"Content-Security-Policy": "default-src 'none'; report-to csp-endpoint",
+	})
+	d3.RequestURL, d3.FinalURL = "https://me.test", "https://me.test"
+	d3.Header.Add("Reporting-Endpoints", `csp-endpoint="https://me.test/csp"`)
+	if out := chkReportSameOrigin(t.Context(), &CheckCtx{Doc: d3}); out.Status != Pass {
+		t.Errorf("same-origin reporting endpoint: got %s, want PASS", out.Status)
+	}
+
+	// CSP report-to with a group name and NO resolving header — the group is
+	// unresolvable, no URL surfaced, no external => PASS (nothing to judge).
+	d4 := newDoc(200, "", map[string]string{
+		"Content-Security-Policy": "default-src 'none'; report-to csp-endpoint",
+	})
+	d4.RequestURL, d4.FinalURL = "https://me.test", "https://me.test"
+	if out := chkReportSameOrigin(t.Context(), &CheckCtx{Doc: d4}); out.Status != Pass {
+		t.Errorf("unresolvable group must not FP: got %s, want PASS", out.Status)
+	}
+}
+
+// AG-NET-06 must catch priming delivered via the Link HTTP header, not only
+// via <link> in the body. RFC 8288 defines both; a server can prime an origin
+// without touching the HTML at all.
+func TestChkNoPrimingCoversLinkHeader(t *testing.T) {
+	// Body clean, but the response carries a Link: <third-party>; rel=preconnect.
+	d := newDoc(200, "<html></html>", nil)
+	d.RequestURL, d.FinalURL = "https://me.test", "https://me.test"
+	d.Header.Add("Link", `<https://cdn.evil/x>; rel="preconnect"`)
+	if out := chkNoPriming(t.Context(), &CheckCtx{Doc: d}); out.Status != Fail {
+		t.Errorf("Link-header preconnect to third-party: got %s, want FAIL", out.Status)
+	}
+	// Same-origin Link header must pass.
+	d2 := newDoc(200, "<html></html>", nil)
+	d2.RequestURL, d2.FinalURL = "https://me.test", "https://me.test"
+	d2.Header.Add("Link", `</assets/main.css>; rel="preload"; as="style"`)
+	if out := chkNoPriming(t.Context(), &CheckCtx{Doc: d2}); out.Status != Pass {
+		t.Errorf("same-origin Link header (preload, not preconnect): got %s, want PASS", out.Status)
+	}
+	// Substring bug regression: an attribute value like rel="mypreconnectstyle"
+	// used to falsely trigger under strings.Contains.
+	body := `<link rel="mypreconnectstyle" href="https://cdn.evil/x">`
+	d3 := newDoc(200, body, nil)
+	d3.RequestURL, d3.FinalURL = "https://me.test", "https://me.test"
+	if out := chkNoPriming(t.Context(), &CheckCtx{Doc: d3}); out.Status != Pass {
+		t.Errorf("substring-only rel must not FP: got %s, want PASS", out.Status)
+	}
+}
+
+// AG-NET-03 must walk worker-src → child-src → script-src → default-src per
+// CSP L3 §6.1. A policy that scopes default-src to 'none' but opens script-src
+// leaks WORKER load — old code missed it by short-circuiting to default-src.
+func TestChkWorkerSrcHonorsScriptSrcFallback(t *testing.T) {
+	c := cspDoc("default-src 'none'; script-src 'self' https://cdn.evil")
+	out := chkWorkerSrc(t.Context(), c)
+	if out.Status != Fail {
+		t.Errorf("worker-src via script-src fallback with third-party: got %s, want FAIL", out.Status)
+	}
+	// child-src short-circuits the chain: script-src being permissive is irrelevant.
+	c2 := cspDoc("default-src 'none'; child-src 'self'; script-src https://cdn.evil")
+	if out := chkWorkerSrc(t.Context(), c2); out.Status != Pass {
+		t.Errorf("child-src 'self' short-circuits worker-src: got %s, want PASS", out.Status)
+	}
+}
+
+// AG-NET-01 must reject a policy that only scopes some directives and leaves
+// the rest wide open. `script-src 'self'` with no default-src leaves img-src,
+// font-src, media-src, etc. at the browser default (*), which is a leak.
+func TestChkSelfHostAllFlagsUnsetDirectives(t *testing.T) {
+	c := cspDoc("script-src 'self'")
+	out := chkSelfHostAll(t.Context(), c)
+	if out.Status != Fail {
+		t.Fatalf("script-src 'self' alone must FAIL (img-src etc. wide open), got %s", out.Status)
+	}
+	if !strings.Contains(out.Evidence.Observed, "img-src") {
+		t.Errorf("evidence should name the unset directives, got %q", out.Evidence.Observed)
+	}
 }
 
 func TestChkConnectSrcLevelGated(t *testing.T) {

@@ -117,9 +117,10 @@ func (s Surface) IsPrivacy() bool {
 }
 
 type Allow struct {
-	Connect []string `yaml:"connect"`
-	Storage []string `yaml:"storage"`
-	Embeds  []string `yaml:"embeds"`
+	Connect      []string `yaml:"connect"`
+	Storage      []string `yaml:"storage"`
+	Embeds       []string `yaml:"embeds"`
+	Subresources []string `yaml:"subresources"` // host list for AG-NET-02 at L1+
 }
 
 type DNS struct {
