@@ -61,6 +61,40 @@ func (p Policy) Effective(directive string) ([]string, bool) {
 	return nil, false
 }
 
+// effectiveFallbacks are the spec-defined fallback chains for directives that
+// do NOT fall back directly to default-src. Ordered most-specific first.
+// Reference: CSP Level 3 §6.1 (Fetch Directives) — worker-src falls back to
+// child-src then script-src then default-src; script-src-* variants fall back
+// to script-src; style-src-* to style-src.
+var effectiveFallbacks = map[string][]string{
+	"worker-src":      {"child-src", "script-src", "default-src"},
+	"script-src-elem": {"script-src", "default-src"},
+	"script-src-attr": {"script-src", "default-src"},
+	"style-src-elem":  {"style-src", "default-src"},
+	"style-src-attr":  {"style-src", "default-src"},
+	"frame-src":       {"child-src", "default-src"},
+}
+
+// EffectiveWithFallback returns the source list for a directive, honoring the
+// full spec fallback chain (not only default-src). For directives with no
+// declared chain it degrades to Effective. Returns (nil,false) only when the
+// directive AND every fallback in its chain are absent.
+func (p Policy) EffectiveWithFallback(directive string) ([]string, bool) {
+	directive = strings.ToLower(directive)
+	if v, ok := p.Directives[directive]; ok {
+		return v, true
+	}
+	if chain, ok := effectiveFallbacks[directive]; ok {
+		for _, next := range chain {
+			if v, ok := p.Directives[next]; ok {
+				return v, true
+			}
+		}
+		return nil, false
+	}
+	return p.Effective(directive)
+}
+
 // SelfOnly reports whether a source list permits only first-party / inert
 // origins ('self', 'none', data:, blob:) and nothing third-party.
 func SelfOnly(vals []string) bool {

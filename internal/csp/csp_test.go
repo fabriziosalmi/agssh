@@ -50,6 +50,37 @@ func TestEffectiveFallsBackToDefaultSrc(t *testing.T) {
 	}
 }
 
+// EffectiveWithFallback must honor the full spec fallback chain, not just
+// default-src. AG-NET-03 depends on worker-src walking child-src → script-src
+// → default-src; the plain Effective() would jump straight to default-src and
+// miss a third-party origin permitted only by script-src.
+func TestEffectiveWithFallbackChain(t *testing.T) {
+	// worker-src absent, child-src absent, script-src wide open -> chain resolves
+	// to script-src and reports the third-party origin.
+	p := Parse("default-src 'none'; script-src 'self' https://cdn.evil")
+	v, ok := p.EffectiveWithFallback("worker-src")
+	if !ok {
+		t.Fatalf("worker-src must resolve via chain to script-src, got ok=false")
+	}
+	if SelfOnly(v) {
+		t.Errorf("worker-src resolved to %v — must NOT be self-only (script-src leaks)", v)
+	}
+	// child-src explicitly set short-circuits the chain.
+	p2 := Parse("default-src 'none'; child-src 'self'; script-src https://cdn.evil")
+	v2, _ := p2.EffectiveWithFallback("worker-src")
+	if !SelfOnly(v2) {
+		t.Errorf("child-src 'self' must short-circuit worker-src fallback, got %v", v2)
+	}
+	// No chain member at all -> unresolvable.
+	if _, ok := Parse("style-src 'self'").EffectiveWithFallback("worker-src"); ok {
+		t.Error("worker-src with no chain member and no default-src must be unresolvable")
+	}
+	// Directives without an explicit chain still resolve via plain Effective.
+	if v, ok := Parse("default-src 'self'").EffectiveWithFallback("img-src"); !ok || !SelfOnly(v) {
+		t.Errorf("img-src should fall through to default-src, got %v ok=%v", v, ok)
+	}
+}
+
 func TestSelfOnly(t *testing.T) {
 	cases := []struct {
 		vals []string
