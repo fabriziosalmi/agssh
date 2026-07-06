@@ -102,13 +102,59 @@ func TestChkSRI(t *testing.T) {
 	if out := chkSRI(context.Background(), &CheckCtx{Doc: docFinal("https://me.test", body)}); out.Status != Fail {
 		t.Errorf("cross-origin script without integrity: want FAIL, got %s", out.Status)
 	}
-	okBody := `<script src="https://cdn.evil/x.js" integrity="sha384-abc"></script>`
+	// integrity present AND crossorigin present => enforceable SRI => PASS
+	okBody := `<script src="https://cdn.evil/x.js" integrity="sha384-abc" crossorigin="anonymous"></script>`
 	if out := chkSRI(context.Background(), &CheckCtx{Doc: docFinal("https://me.test", okBody)}); out.Status != Pass {
-		t.Errorf("cross-origin script with integrity: want PASS, got %s", out.Status)
+		t.Errorf("cross-origin script with integrity+crossorigin: want PASS, got %s", out.Status)
+	}
+	// integrity present, crossorigin MISSING => browser treats response as opaque
+	// => SRI is inert => FAIL. This is the load-bearing correction.
+	noCORS := `<script src="https://cdn.evil/x.js" integrity="sha384-abc"></script>`
+	if out := chkSRI(context.Background(), &CheckCtx{Doc: docFinal("https://me.test", noCORS)}); out.Status != Fail {
+		t.Errorf("cross-origin script with integrity but no crossorigin: want FAIL (inert SRI), got %s", out.Status)
 	}
 	rel := `<script src="/local.js"></script>`
 	if out := chkSRI(context.Background(), &CheckCtx{Doc: docFinal("https://me.test", rel)}); out.Status != Pass {
 		t.Errorf("same-origin script: want PASS, got %s", out.Status)
+	}
+}
+
+// AG-SUP-01 must reject malformed integrity tokens (a `sha1-` prefix, a random
+// non-sha* string) even if a `crossorigin` attribute is present. Browsers
+// silently ignore unrecognized algorithms, which would leave SRI unenforced.
+func TestChkSRIRejectsMalformedIntegrity(t *testing.T) {
+	body := `<script src="https://cdn.evil/x.js" integrity="foo" crossorigin="anonymous"></script>`
+	if out := chkSRI(context.Background(), &CheckCtx{Doc: docFinal("https://me.test", body)}); out.Status != Fail {
+		t.Errorf("integrity='foo' must FAIL, got %s", out.Status)
+	}
+	sha1 := `<script src="https://cdn.evil/x.js" integrity="sha1-abcdef" crossorigin="anonymous"></script>`
+	if out := chkSRI(context.Background(), &CheckCtx{Doc: docFinal("https://me.test", sha1)}); out.Status != Fail {
+		t.Errorf("sha1- prefix (browser-ignored) must FAIL, got %s", out.Status)
+	}
+	// Multi-token integrity — at least one well-formed token is enough for the browser.
+	multi := `<script src="https://cdn.evil/x.js" integrity="sha1-broken sha384-Yr8asdf++/base64=" crossorigin="anonymous"></script>`
+	if out := chkSRI(context.Background(), &CheckCtx{Doc: docFinal("https://me.test", multi)}); out.Status != Pass {
+		t.Errorf("multi-token integrity with one valid sha384: want PASS, got %s", out.Status)
+	}
+}
+
+// AG-SUP-01 must also cover <link rel=modulepreload> and <link rel=preload as=script|style>
+// (both fetch executable code cross-origin; SRI applies).
+func TestChkSRIModulepreloadAndPreload(t *testing.T) {
+	// modulepreload cross-origin without integrity => FAIL
+	body := `<link rel="modulepreload" href="https://cdn.evil/x.js">`
+	if out := chkSRI(context.Background(), &CheckCtx{Doc: docFinal("https://me.test", body)}); out.Status != Fail {
+		t.Errorf("cross-origin modulepreload without integrity: got %s, want FAIL", out.Status)
+	}
+	// preload as=script without integrity => FAIL
+	body2 := `<link rel="preload" as="script" href="https://cdn.evil/x.js">`
+	if out := chkSRI(context.Background(), &CheckCtx{Doc: docFinal("https://me.test", body2)}); out.Status != Fail {
+		t.Errorf("cross-origin preload as=script without integrity: got %s, want FAIL", out.Status)
+	}
+	// preload as=image is not a code sink and is out of scope for SRI => PASS
+	body3 := `<link rel="preload" as="image" href="https://cdn.evil/x.png">`
+	if out := chkSRI(context.Background(), &CheckCtx{Doc: docFinal("https://me.test", body3)}); out.Status != Pass {
+		t.Errorf("cross-origin preload as=image is out of scope: got %s, want PASS", out.Status)
 	}
 }
 

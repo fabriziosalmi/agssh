@@ -602,21 +602,72 @@ func chkEmbedsSandboxed(_ context.Context, c *CheckCtx) Outcome {
 	return okay("iframes sandboxed (or none)", "")
 }
 
-// AG-SUP-01: cross-origin subresources carry Subresource Integrity.
+// validSRIToken reports whether v is a syntactically valid
+// hash-algorithm-base64 SRI token. `integrity` may carry multiple
+// space-separated tokens; at least one must be well-formed for the browser to
+// enforce.
+var sriTokenRe = regexp.MustCompile(`^sha(256|384|512)-[A-Za-z0-9+/]+={0,2}$`)
+
+func hasValidSRIToken(integrity string) bool {
+	for _, t := range strings.Fields(strings.TrimSpace(integrity)) {
+		if sriTokenRe.MatchString(t) {
+			return true
+		}
+	}
+	return false
+}
+
+// AG-SUP-01: cross-origin subresources carry ENFORCEABLE Subresource
+// Integrity. Enforcement requires all of: (a) a syntactically valid
+// integrity token, (b) a `crossorigin` attribute so the browser fetches CORS
+// mode and the response is not opaque — without it, the integrity check is
+// bypassed and the SRI is decorative.
+//
+// Coverage: <script src>, <link rel=stylesheet>, <link rel=modulepreload>,
+// <link rel=preload as=script|style>.
 func chkSRI(_ context.Context, c *CheckCtx) Outcome {
 	if c.Doc == nil {
 		return inconclusive("surface not fetched")
 	}
+	type sub struct {
+		kind, url, integrity, crossorigin string
+	}
+	var subs []sub
+
 	for _, e := range collectEls(c.Doc.Body, "script") {
-		if isExternal(c.Doc.FinalURL, e.attr["src"]) && strings.TrimSpace(e.attr["integrity"]) == "" {
-			return bad("cross-origin script without integrity: "+e.attr["src"], "integrity + crossorigin on every cross-origin subresource")
+		if src := e.attr["src"]; src != "" && isExternal(c.Doc.FinalURL, src) {
+			subs = append(subs, sub{"script", src, e.attr["integrity"], e.attr["crossorigin"]})
 		}
 	}
 	for _, e := range collectEls(c.Doc.Body, "link") {
-		if strings.Contains(strings.ToLower(e.attr["rel"]), "stylesheet") &&
-			isExternal(c.Doc.FinalURL, e.attr["href"]) && strings.TrimSpace(e.attr["integrity"]) == "" {
-			return bad("cross-origin stylesheet without integrity: "+e.attr["href"], "integrity on cross-origin stylesheets")
+		rel := e.attr["rel"]
+		href := e.attr["href"]
+		if href == "" || !isExternal(c.Doc.FinalURL, href) {
+			continue
+		}
+		switch {
+		case relHas(rel, "stylesheet"):
+			subs = append(subs, sub{"stylesheet", href, e.attr["integrity"], e.attr["crossorigin"]})
+		case relHas(rel, "modulepreload"):
+			subs = append(subs, sub{"modulepreload", href, e.attr["integrity"], e.attr["crossorigin"]})
+		case relHas(rel, "preload"):
+			// preload only carries SRI meaningfully for script/style.
+			switch strings.ToLower(e.attr["as"]) {
+			case "script", "style":
+				subs = append(subs, sub{"preload-" + e.attr["as"], href, e.attr["integrity"], e.attr["crossorigin"]})
+			}
 		}
 	}
-	return okay("cross-origin subresources pinned (or none)", "")
+
+	for _, s := range subs {
+		if !hasValidSRIToken(s.integrity) {
+			return bad("cross-origin "+s.kind+" without valid integrity: "+s.url,
+				"integrity=sha{256,384,512}-<base64> + crossorigin on every cross-origin subresource")
+		}
+		if strings.TrimSpace(s.crossorigin) == "" {
+			return bad("cross-origin "+s.kind+" has integrity but no crossorigin attr (SRI is inert without CORS mode): "+s.url,
+				"integrity + crossorigin=anonymous (or use-credentials)")
+		}
+	}
+	return okay("cross-origin subresources pinned with enforceable SRI (or none)", "")
 }
