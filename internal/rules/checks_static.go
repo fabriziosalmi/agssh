@@ -72,9 +72,58 @@ func isExternal(surfaceURL, ref string) bool {
 var (
 	analyticsRe = regexp.MustCompile(`googletagmanager|google-analytics|gtag\s*\(|\b_gaq\b|\bG-[A-Z0-9]{10}\b|\bUA-[0-9]{4,}-[0-9]{1,4}\b`)
 	fontHostRe  = regexp.MustCompile(`(?i)fonts\.(googleapis|gstatic)\.com`)
-	cdnLoaderRe = regexp.MustCompile(`(?i)cdn\.jsdelivr\.net|unpkg\.com|cdnjs\.cloudflare\.com|esm\.sh|skypack\.dev|cdn\.tiny\.cloud|tessdata`)
 	maxAgeRe    = regexp.MustCompile(`(?i)max-age\s*=\s*(\d+)`)
 )
+
+// subresourceRefs walks the HTML and returns the (tag, url) pairs of every
+// element that can trigger a subresource fetch. Attributes covered:
+//
+//	<script src>                                  code
+//	<link rel=stylesheet|preload|modulepreload|prefetch href>   assets
+//	<img src>, <img srcset>                                     images
+//	<iframe src>, <embed src>, <object data>                    frames/objects
+//	<video src>, <audio src>, <source src>, <track src>         media
+//
+// The rewrite intentionally does NOT try to enumerate every possible loader
+// (no runtime JS analysis) — but it covers the surface a static check can
+// meaningfully make claims about, replacing the previous substring blocklist.
+func subresourceRefs(body []byte) []struct{ Tag, URL string } {
+	tags := []string{"script", "link", "img", "iframe", "embed", "object", "video", "audio", "source", "track"}
+	var refs []struct{ Tag, URL string }
+	push := func(tag, url string) {
+		url = strings.TrimSpace(url)
+		if url != "" {
+			refs = append(refs, struct{ Tag, URL string }{tag, url})
+		}
+	}
+	for _, e := range collectEls(body, tags...) {
+		switch e.tag {
+		case "script", "img", "iframe", "embed", "video", "audio", "source", "track":
+			push(e.tag, e.attr["src"])
+			if e.tag == "img" && e.attr["srcset"] != "" {
+				for _, s := range strings.Split(e.attr["srcset"], ",") {
+					url := strings.TrimSpace(s)
+					if sp := strings.IndexAny(url, " \t"); sp >= 0 {
+						url = url[:sp] // strip the descriptor (e.g. "1x")
+					}
+					push(e.tag, url)
+				}
+			}
+		case "object":
+			push(e.tag, e.attr["data"])
+		case "link":
+			// Only rels that actually fetch a resource.
+			if relHas(e.attr["rel"], "stylesheet") ||
+				relHas(e.attr["rel"], "modulepreload") ||
+				relHas(e.attr["rel"], "preload") ||
+				relHas(e.attr["rel"], "prefetch") ||
+				relHas(e.attr["rel"], "icon") {
+				push(e.tag, e.attr["href"])
+			}
+		}
+	}
+	return refs
+}
 
 // ---------- CSP / egress ----------
 
@@ -110,15 +159,46 @@ func chkSelfHostAll(_ context.Context, c *CheckCtx) Outcome {
 	return okay("no third-party fetch-directive", "")
 }
 
-// AG-NET-02: no default CDN loader hosts referenced in the page.
+// hostAllowed reports whether host is in the allow-list (case-insensitive
+// exact match). No wildcard semantics — an allow-list for a security check
+// should be explicit.
+func hostAllowed(host string, allow []string) bool {
+	host = strings.ToLower(strings.TrimSpace(host))
+	for _, a := range allow {
+		if strings.ToLower(strings.TrimSpace(a)) == host {
+			return true
+		}
+	}
+	return false
+}
+
+// AG-NET-02: no external subresource loaders. The previous implementation
+// substring-matched seven CDN hostnames against the raw body — false-positive
+// on prose ("do not use cdn.jsdelivr.net"), false-negative on every CDN not
+// in the hardcoded list, and blind to runtime-injected URLs. Replaced with an
+// HTML-aware enumerator of every element that triggers a subresource fetch:
+// any cross-origin URL is a leak.
+//
+// Level gate: at L0 (strict air-gap) zero external subresources tolerated. At
+// L1+ (scoped egress) manifest.Allow.Subresources may exempt specific hosts.
 func chkNoCDNLoaders(_ context.Context, c *CheckCtx) Outcome {
 	if c.Doc == nil {
 		return inconclusive("surface not fetched")
 	}
-	if m := cdnLoaderRe.FindString(string(c.Doc.Body)); m != "" {
-		return bad("references CDN loader: "+m, "self-hosted assets only")
+	allow := []string(nil)
+	if c.Level >= 1 {
+		allow = c.Allow.Subresources
 	}
-	return okay("no public CDN loader references", "")
+	for _, r := range subresourceRefs(c.Doc.Body) {
+		if !isExternal(c.Doc.FinalURL, r.URL) {
+			continue
+		}
+		if hostAllowed(httpx.HostOf(r.URL), allow) {
+			continue
+		}
+		return bad("external "+r.Tag+" subresource: "+r.URL, "self-hosted assets only (or an explicit allow.subresources entry at L1+)")
+	}
+	return okay("no external subresource loaders", "")
 }
 
 // AG-NET-03: worker-src is first-party only. Per CSP L3 §6.1 worker-src falls

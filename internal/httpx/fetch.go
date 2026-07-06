@@ -93,12 +93,15 @@ func (d *Doc) MetaCSP() string {
 
 // SameHost reports whether other shares the surface's host.
 func SameHost(surfaceURL, other string) bool {
-	hs := hostOf(surfaceURL)
-	ho := hostOf(other)
+	hs := HostOf(surfaceURL)
+	ho := HostOf(other)
 	return hs != "" && hs == ho
 }
 
-func hostOf(raw string) string {
+// HostOf extracts the host component from a URL-like string. It strips scheme,
+// path, query, fragment, userinfo and port. Loose by design: callers pass raw
+// href/src attributes that may not be well-formed URLs.
+func HostOf(raw string) string {
 	raw = strings.TrimSpace(raw)
 	if i := strings.Index(raw, "://"); i >= 0 {
 		raw = raw[i+3:]

@@ -222,6 +222,56 @@ func cspDoc(policy string) *CheckCtx {
 	return &CheckCtx{Doc: newDoc(200, "", map[string]string{"Content-Security-Policy": policy})}
 }
 
+// AG-NET-02: the rewrite must parse HTML instead of substring-matching. Cases
+// that used to be broken by the old regex-on-body approach:
+//   - prose mentioning "cdn.jsdelivr.net" (false positive) — must PASS
+//   - <script src=https://ajax.googleapis.com/...> (blocklist miss) — must FAIL
+//   - modulepreload cross-origin — must FAIL
+//   - image srcset cross-origin — must FAIL
+//   - allow.subresources at L1+ scopes the exemption to a named host
+func TestChkNoCDNLoadersEnumeratesHTML(t *testing.T) {
+	doc := func(body string) *CheckCtx {
+		return &CheckCtx{Doc: docFinal("https://me.test", body)}
+	}
+	// Prose match on the old regex, no subresource load — must PASS.
+	prose := `<p>Do not use cdn.jsdelivr.net for production assets.</p>`
+	if out := chkNoCDNLoaders(t.Context(), doc(prose)); out.Status != Pass {
+		t.Errorf("prose mention with no subresource load: got %s, want PASS", out.Status)
+	}
+	// External subresource NOT in the old regex — must now FAIL.
+	miss := `<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>`
+	if out := chkNoCDNLoaders(t.Context(), doc(miss)); out.Status != Fail {
+		t.Errorf("blocklist-missing CDN in a real <script src>: got %s, want FAIL", out.Status)
+	}
+	// modulepreload cross-origin — must FAIL.
+	mp := `<link rel="modulepreload" href="https://cdn.evil/x.mjs">`
+	if out := chkNoCDNLoaders(t.Context(), doc(mp)); out.Status != Fail {
+		t.Errorf("cross-origin modulepreload: got %s, want FAIL", out.Status)
+	}
+	// srcset with cross-origin URL — must FAIL.
+	srcset := `<img srcset="https://cdn.evil/small.png 1x, https://cdn.evil/big.png 2x">`
+	if out := chkNoCDNLoaders(t.Context(), doc(srcset)); out.Status != Fail {
+		t.Errorf("cross-origin srcset: got %s, want FAIL", out.Status)
+	}
+	// Same-origin subresource — must PASS.
+	same := `<script src="/assets/app.js"></script><img src="/logo.png">`
+	if out := chkNoCDNLoaders(t.Context(), doc(same)); out.Status != Pass {
+		t.Errorf("same-origin only: got %s, want PASS", out.Status)
+	}
+	// L1 with an explicit allow.subresources entry — the exempt host passes.
+	c := doc(`<script src="https://api.assets.example/app.js"></script>`)
+	c.Level = manifest.L1
+	c.Allow = manifest.Allow{Subresources: []string{"api.assets.example"}}
+	if out := chkNoCDNLoaders(t.Context(), c); out.Status != Pass {
+		t.Errorf("L1 allow.subresources exemption: got %s, want PASS", out.Status)
+	}
+	// L0 must ignore the allow-list — strict air-gap.
+	c.Level = manifest.L0
+	if out := chkNoCDNLoaders(t.Context(), c); out.Status != Fail {
+		t.Errorf("L0 must ignore allow.subresources: got %s, want FAIL", out.Status)
+	}
+}
+
 // AG-NET-09 must also cover <form target=_blank action="external">: form
 // submissions leak window.opener via the same HTML mechanism as <a>. And rel
 // must be tokenized (a rel value "notnoopener" must not falsely pass).
