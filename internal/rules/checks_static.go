@@ -155,16 +155,93 @@ func chkConnectSrc(_ context.Context, c *CheckCtx) Outcome {
 	return bad("connect-src admits: "+strings.Join(badVals, ", "), "connect-src 'none' or declared allow-list only")
 }
 
-// AG-NET-06: no <link rel=preconnect|dns-prefetch> to third-party origins.
+// relHas reports whether the space-separated rel token list contains want as
+// a whole token (not a substring). Case-insensitive per the HTML rel spec.
+func relHas(rel, want string) bool {
+	want = strings.ToLower(want)
+	for _, t := range strings.Fields(strings.ToLower(rel)) {
+		if t == want {
+			return true
+		}
+	}
+	return false
+}
+
+// parseLinkHeader extracts (uri, rel) pairs from RFC 8288 Link headers. Each
+// header value may carry multiple comma-separated links. Missing quotes on
+// rel are tolerated ('rel=preconnect' and 'rel="preconnect"' both match).
+func parseLinkHeader(vals []string) []struct{ URI, Rel string } {
+	var out []struct{ URI, Rel string }
+	for _, v := range vals {
+		for _, link := range splitLinkValue(v) {
+			link = strings.TrimSpace(link)
+			if !strings.HasPrefix(link, "<") {
+				continue
+			}
+			end := strings.Index(link, ">")
+			if end < 0 {
+				continue
+			}
+			uri := link[1:end]
+			var rel string
+			for _, param := range strings.Split(link[end+1:], ";") {
+				param = strings.TrimSpace(param)
+				const p = "rel="
+				if strings.HasPrefix(strings.ToLower(param), p) {
+					rel = strings.Trim(param[len(p):], `"'`)
+					break
+				}
+			}
+			out = append(out, struct{ URI, Rel string }{uri, rel})
+		}
+	}
+	return out
+}
+
+// splitLinkValue splits a Link header value on commas outside <...>.
+func splitLinkValue(v string) []string {
+	var out []string
+	depth := 0
+	start := 0
+	for i, r := range v {
+		switch r {
+		case '<':
+			depth++
+		case '>':
+			if depth > 0 {
+				depth--
+			}
+		case ',':
+			if depth == 0 {
+				out = append(out, v[start:i])
+				start = i + 1
+			}
+		}
+	}
+	out = append(out, v[start:])
+	return out
+}
+
+// AG-NET-06: no priming of third-party origins. Priming can be delivered via
+// <link rel=preconnect|dns-prefetch> in the HTML body OR via the HTTP Link
+// header (RFC 8288). Missing the header-delivered form is a real bypass: a
+// server can prime any origin without touching the HTML.
 func chkNoPriming(_ context.Context, c *CheckCtx) Outcome {
 	if c.Doc == nil {
 		return inconclusive("surface not fetched")
 	}
 	for _, e := range collectEls(c.Doc.Body, "link") {
-		rel := strings.ToLower(e.attr["rel"])
-		if strings.Contains(rel, "preconnect") || strings.Contains(rel, "dns-prefetch") {
+		rel := e.attr["rel"]
+		if relHas(rel, "preconnect") || relHas(rel, "dns-prefetch") {
 			if isExternal(c.Doc.FinalURL, e.attr["href"]) {
-				return bad("primes third-party: "+e.attr["href"], "no third-party preconnect/dns-prefetch")
+				return bad("primes third-party (HTML): "+e.attr["href"], "no third-party preconnect/dns-prefetch")
+			}
+		}
+	}
+	for _, link := range parseLinkHeader(c.Doc.Header.Values("Link")) {
+		if relHas(link.Rel, "preconnect") || relHas(link.Rel, "dns-prefetch") {
+			if isExternal(c.Doc.FinalURL, link.URI) {
+				return bad("primes third-party (Link header): "+link.URI, "no third-party preconnect/dns-prefetch")
 			}
 		}
 	}

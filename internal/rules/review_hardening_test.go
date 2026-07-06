@@ -222,6 +222,34 @@ func cspDoc(policy string) *CheckCtx {
 	return &CheckCtx{Doc: newDoc(200, "", map[string]string{"Content-Security-Policy": policy})}
 }
 
+// AG-NET-06 must catch priming delivered via the Link HTTP header, not only
+// via <link> in the body. RFC 8288 defines both; a server can prime an origin
+// without touching the HTML at all.
+func TestChkNoPrimingCoversLinkHeader(t *testing.T) {
+	// Body clean, but the response carries a Link: <third-party>; rel=preconnect.
+	d := newDoc(200, "<html></html>", nil)
+	d.RequestURL, d.FinalURL = "https://me.test", "https://me.test"
+	d.Header.Add("Link", `<https://cdn.evil/x>; rel="preconnect"`)
+	if out := chkNoPriming(t.Context(), &CheckCtx{Doc: d}); out.Status != Fail {
+		t.Errorf("Link-header preconnect to third-party: got %s, want FAIL", out.Status)
+	}
+	// Same-origin Link header must pass.
+	d2 := newDoc(200, "<html></html>", nil)
+	d2.RequestURL, d2.FinalURL = "https://me.test", "https://me.test"
+	d2.Header.Add("Link", `</assets/main.css>; rel="preload"; as="style"`)
+	if out := chkNoPriming(t.Context(), &CheckCtx{Doc: d2}); out.Status != Pass {
+		t.Errorf("same-origin Link header (preload, not preconnect): got %s, want PASS", out.Status)
+	}
+	// Substring bug regression: an attribute value like rel="mypreconnectstyle"
+	// used to falsely trigger under strings.Contains.
+	body := `<link rel="mypreconnectstyle" href="https://cdn.evil/x">`
+	d3 := newDoc(200, body, nil)
+	d3.RequestURL, d3.FinalURL = "https://me.test", "https://me.test"
+	if out := chkNoPriming(t.Context(), &CheckCtx{Doc: d3}); out.Status != Pass {
+		t.Errorf("substring-only rel must not FP: got %s, want PASS", out.Status)
+	}
+}
+
 // AG-NET-03 must walk worker-src → child-src → script-src → default-src per
 // CSP L3 §6.1. A policy that scopes default-src to 'none' but opens script-src
 // leaks WORKER load — old code missed it by short-circuiting to default-src.
