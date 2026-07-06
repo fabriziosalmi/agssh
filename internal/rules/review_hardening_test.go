@@ -222,6 +222,52 @@ func cspDoc(policy string) *CheckCtx {
 	return &CheckCtx{Doc: newDoc(200, "", map[string]string{"Content-Security-Policy": policy})}
 }
 
+// AG-NET-08 must inspect Report-To / Reporting-Endpoints HEADERS, because the
+// CSP `report-to` directive carries GROUP NAMES that resolve via those
+// headers, not URLs. The old code treated group names as relative URLs and
+// silently missed cross-origin endpoints declared in the headers.
+func TestChkReportSameOriginParsesReportingHeaders(t *testing.T) {
+	// Reporting-Endpoints header names a cross-origin URL.
+	d := newDoc(200, "", map[string]string{
+		"Content-Security-Policy": "default-src 'none'; report-to csp-endpoint",
+	})
+	d.RequestURL, d.FinalURL = "https://me.test", "https://me.test"
+	d.Header.Add("Reporting-Endpoints", `csp-endpoint="https://collector.evil/csp"`)
+	if out := chkReportSameOrigin(t.Context(), &CheckCtx{Doc: d}); out.Status != Fail {
+		t.Errorf("Reporting-Endpoints cross-origin: got %s, want FAIL", out.Status)
+	}
+
+	// Legacy Report-To header (JSON groups) — cross-origin url inside endpoints.
+	d2 := newDoc(200, "", map[string]string{
+		"Content-Security-Policy": "default-src 'none'; report-to grp",
+	})
+	d2.RequestURL, d2.FinalURL = "https://me.test", "https://me.test"
+	d2.Header.Add("Report-To", `{"group":"grp","max_age":10886400,"endpoints":[{"url":"https://collector.evil/r"}]}`)
+	if out := chkReportSameOrigin(t.Context(), &CheckCtx{Doc: d2}); out.Status != Fail {
+		t.Errorf("Report-To JSON cross-origin: got %s, want FAIL", out.Status)
+	}
+
+	// Same-origin endpoint via Reporting-Endpoints: PASS.
+	d3 := newDoc(200, "", map[string]string{
+		"Content-Security-Policy": "default-src 'none'; report-to csp-endpoint",
+	})
+	d3.RequestURL, d3.FinalURL = "https://me.test", "https://me.test"
+	d3.Header.Add("Reporting-Endpoints", `csp-endpoint="https://me.test/csp"`)
+	if out := chkReportSameOrigin(t.Context(), &CheckCtx{Doc: d3}); out.Status != Pass {
+		t.Errorf("same-origin reporting endpoint: got %s, want PASS", out.Status)
+	}
+
+	// CSP report-to with a group name and NO resolving header — the group is
+	// unresolvable, no URL surfaced, no external => PASS (nothing to judge).
+	d4 := newDoc(200, "", map[string]string{
+		"Content-Security-Policy": "default-src 'none'; report-to csp-endpoint",
+	})
+	d4.RequestURL, d4.FinalURL = "https://me.test", "https://me.test"
+	if out := chkReportSameOrigin(t.Context(), &CheckCtx{Doc: d4}); out.Status != Pass {
+		t.Errorf("unresolvable group must not FP: got %s, want PASS", out.Status)
+	}
+}
+
 // AG-NET-06 must catch priming delivered via the Link HTTP header, not only
 // via <link> in the body. RFC 8288 defines both; a server can prime an origin
 // without touching the HTML at all.

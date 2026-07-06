@@ -3,7 +3,9 @@ package rules
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
@@ -248,14 +250,86 @@ func chkNoPriming(_ context.Context, c *CheckCtx) Outcome {
 	return okay("no third-party connection priming", "")
 }
 
-// AG-NET-08: any declared CSP report endpoint is same-origin.
+// reportingEndpoints walks the three places a browser reads endpoint URLs:
+//
+//  1. CSP `report-uri` — a list of URLs directly. (Legacy but widely deployed.)
+//  2. HTTP `Reporting-Endpoints` header — key=url pairs (structured-fields).
+//  3. HTTP `Report-To` header — JSON with `endpoints:[{url:...}]` per group.
+//
+// CSP `report-to <group>` is a NAME, not a URL, and cannot itself be judged
+// same-origin — its URLs live in (2) or (3). Prior implementation treated
+// group names as URLs, which is a silent bypass: an external endpoint declared
+// under Reporting-Endpoints was never inspected.
+func reportingEndpoints(pol csp.Policy, h http.Header) []string {
+	var eps []string
+	// (1) report-uri values ARE URLs.
+	eps = append(eps, pol.Directives["report-uri"]...)
+	// (2) Reporting-Endpoints: name="uri", name2="uri2"
+	for _, v := range h.Values("Reporting-Endpoints") {
+		for _, pair := range splitTopLevel(v, ',') {
+			if eq := strings.Index(pair, "="); eq >= 0 {
+				uri := strings.Trim(strings.TrimSpace(pair[eq+1:]), `"'`)
+				if uri != "" {
+					eps = append(eps, uri)
+				}
+			}
+		}
+	}
+	// (3) Report-To: JSON groups; endpoints[].url
+	for _, v := range h.Values("Report-To") {
+		for _, group := range splitTopLevel(v, ',') {
+			var g struct {
+				Endpoints []struct {
+					URL string `json:"url"`
+				} `json:"endpoints"`
+			}
+			if err := json.Unmarshal([]byte(strings.TrimSpace(group)), &g); err != nil {
+				continue
+			}
+			for _, e := range g.Endpoints {
+				if e.URL != "" {
+					eps = append(eps, e.URL)
+				}
+			}
+		}
+	}
+	return eps
+}
+
+// splitTopLevel splits s on sep at depth 0 (not inside {…} or [...]).
+func splitTopLevel(s string, sep rune) []string {
+	var out []string
+	depth := 0
+	start := 0
+	for i, r := range s {
+		switch r {
+		case '{', '[':
+			depth++
+		case '}', ']':
+			if depth > 0 {
+				depth--
+			}
+		case sep:
+			if depth == 0 {
+				out = append(out, s[start:i])
+				start = i + 1
+			}
+		}
+	}
+	out = append(out, s[start:])
+	return out
+}
+
+// AG-NET-08: every declared reporting endpoint is same-origin. Considers
+// CSP report-uri (URLs), the Reporting-Endpoints header, and the legacy
+// Report-To header. The CSP `report-to` directive carries GROUP NAMES that
+// resolve via those headers — it is not treated as a URL source.
 func chkReportSameOrigin(_ context.Context, c *CheckCtx) Outcome {
 	if c.Doc == nil {
 		return inconclusive("surface not fetched")
 	}
 	pol, _ := docPolicy(c.Doc)
-	eps := pol.ReportEndpoints()
-	for _, ep := range eps {
+	for _, ep := range reportingEndpoints(pol, c.Doc.Header) {
 		if isExternal(c.Doc.FinalURL, ep) {
 			return bad("cross-origin report endpoint: "+ep, "same-origin reporting only")
 		}

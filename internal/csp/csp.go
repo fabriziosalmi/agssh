@@ -174,10 +174,12 @@ func (p Policy) DenyByDefault() (bool, string) {
 	return true, ""
 }
 
-// ReportEndpoints returns any report-uri / report-to targets declared inline.
+// ReportEndpoints returns the URL targets of `report-uri`. The `report-to`
+// directive carries GROUP NAMES resolved via the Reporting-Endpoints and
+// Report-To HTTP headers — those must be read from the headers, not from
+// this CSP object. AG-NET-08 combines both sources.
 func (p Policy) ReportEndpoints() []string {
-	var out []string
+	out := make([]string, 0, len(p.Directives["report-uri"]))
 	out = append(out, p.Directives["report-uri"]...)
-	out = append(out, p.Directives["report-to"]...)
 	return out
 }
