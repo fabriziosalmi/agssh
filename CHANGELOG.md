@@ -6,6 +6,68 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.2.0] — 2026-07-06
+
+### Fixed (adversarial review pass — AG-NET-* + AG-SUP-01)
+
+- **AG-NET-01:** a policy that scoped some directives but left the rest unset
+  (no `default-src` to fall back to) used to PASS despite the browser's
+  wide-open initial value for missing fetch-directives. Now flagged with
+  evidence naming each unset directive.
+- **AG-NET-02: full rewrite.** The prior implementation substring-matched
+  seven hardcoded CDN hostnames against the raw HTML body — false-positive on
+  prose ("do not use cdn.jsdelivr.net") and false-negative on every real CDN
+  not in the list (`ajax.googleapis.com`, `code.jquery.com`, CNAMEs, S3/R2
+  buckets, …). Replaced with an HTML-aware enumerator of every
+  subresource-fetching element (`<script src>`, `<link rel=stylesheet|
+  modulepreload|preload|prefetch|icon>`, `<img src>`/`<img srcset>`,
+  `<iframe|embed|video|audio|source|track src>`, `<object data>`). Any
+  cross-origin URL fails at L0; at L1+ a new `allow.subresources` allow-list
+  scopes exemptions by exact host.
+- **AG-NET-03:** `worker-src` now walks the real CSP L3 fallback chain
+  (worker-src → child-src → script-src → default-src) rather than
+  short-circuiting to `default-src`. A permissive `script-src` that used to
+  hide behind `default-src 'none'` is now caught.
+- **AG-NET-06:** also parses the `Link` HTTP header (RFC 8288) for
+  `preconnect`/`dns-prefetch` — a server could prime any origin without
+  touching the HTML and silently pass. `rel` matching moved from
+  `strings.Contains` to token-exact.
+- **AG-NET-08:** the previous check treated CSP `report-to` values as URLs,
+  but per spec they are GROUP NAMES resolved via the `Reporting-Endpoints`
+  and legacy `Report-To` HTTP headers. Endpoints declared through those
+  headers were never inspected. Now unions all three sources
+  (`report-uri` URLs + `Reporting-Endpoints` structured header +
+  `Report-To` JSON header) and judges each against the surface origin.
+- **AG-NET-09:** now covers `<form target=_blank action="external">` —
+  form submissions leak `window.opener` via the same HTML mechanism as
+  `<a>`. `rel` matching is token-exact so `rel="notnoopener"` no longer
+  falsely satisfies the check.
+- **AG-SUP-01:** required Subresource Integrity to be ENFORCEABLE — not
+  merely present. The old check accepted `integrity="sha384-abc"` even
+  without a `crossorigin` attribute, but browsers fetch such responses
+  opaque (no-CORS) and cannot compute the hash, so SRI is silently
+  skipped. Now requires (a) a syntactically valid
+  `sha{256,384,512}-<base64>` token and (b) a `crossorigin` attribute.
+  Coverage extended to `<link rel=modulepreload>` and
+  `<link rel=preload as=script|style>`.
+
+### Added
+
+- `csp.EffectiveWithFallback` — walks the full CSP L3 fallback chain, not
+  only `default-src`, for directives that have intermediate fallbacks
+  (`worker-src`, `script-src-elem/attr`, `style-src-elem/attr`, `frame-src`).
+- `httpx.HostOf` — the previously-unexported `hostOf` is now public so
+  sibling packages can reuse the same URL-loose host extraction.
+- `manifest.Allow.Subresources` — YAML key `allow.subresources`, additive.
+  Consumed by AG-NET-02 at L1+; unused at L0 (strict air-gap).
+
+### Changed
+
+- `csp.Policy.ReportEndpoints()` now returns only `report-uri` targets. The
+  prior behavior of also returning `report-to` group names was a footgun
+  that caused AG-NET-08's silent bypass; endpoint resolution moved to the
+  rules package where the resolving HTTP headers are visible.
+
 ## [1.1.0] — 2026-06-16
 
 ### Fixed (adversarial review pass)
@@ -106,6 +168,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - CI: build, `go vet`, `gofmt`, `go test -race`, spec↔runner skew enforcement, and
   a goreleaser release pipeline.
 
-[Unreleased]: https://github.com/fabriziosalmi/agssh/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/fabriziosalmi/agssh/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/fabriziosalmi/agssh/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/fabriziosalmi/agssh/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/fabriziosalmi/agssh/releases/tag/v1.0.0

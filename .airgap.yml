@@ -22,9 +22,10 @@ pipeline:
   enforce_ci_rules: true          # apply the AG-CI family to .github/workflows
 
 allow:
-  connect: []                     # L1 only: explicit origins, never '*'
-  storage: []                     # functional cookies / localStorage keys
-  embeds:  []                     # L2 only: sanctioned third-party embed hosts
+  connect:      []                # L1 only: explicit origins, never '*'
+  storage:      []                # functional cookies / localStorage keys
+  embeds:       []                # L2 only: sanctioned third-party embed hosts
+  subresources: []                # L1+ only: host list exempted by AG-NET-02 (case-insensitive exact match)
 
 waivers:                          # governance for SHOULD deviations (§10 / AG-GOV)
   budget:
