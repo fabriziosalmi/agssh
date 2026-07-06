@@ -222,6 +222,33 @@ func cspDoc(policy string) *CheckCtx {
 	return &CheckCtx{Doc: newDoc(200, "", map[string]string{"Content-Security-Policy": policy})}
 }
 
+// AG-NET-09 must also cover <form target=_blank action="external">: form
+// submissions leak window.opener via the same HTML mechanism as <a>. And rel
+// must be tokenized (a rel value "notnoopener" must not falsely pass).
+func TestChkNoopenerCoversFormsAndTokenizesRel(t *testing.T) {
+	surf := func(body string) *CheckCtx {
+		return &CheckCtx{
+			Surface: manifest.Surface{URL: "https://me.test", Kind: "site"},
+			Doc:     docFinal("https://me.test", body),
+		}
+	}
+	// External form target=_blank without rel: fail.
+	form := `<form target="_blank" action="https://evil.example/x"></form>`
+	if out := chkNoopener(t.Context(), surf(form)); out.Status != Fail {
+		t.Errorf("external form target=_blank without rel: got %s, want FAIL", out.Status)
+	}
+	// External form target=_blank with rel=noopener: pass.
+	formOK := `<form target="_blank" rel="noopener" action="https://evil.example/x"></form>`
+	if out := chkNoopener(t.Context(), surf(formOK)); out.Status != Pass {
+		t.Errorf("form with rel=noopener: got %s, want PASS", out.Status)
+	}
+	// rel="notnoopener" (substring bug regression) — must FAIL, not pass.
+	trap := `<a target="_blank" rel="notnoopener" href="https://evil.example/x">x</a>`
+	if out := chkNoopener(t.Context(), surf(trap)); out.Status != Fail {
+		t.Errorf("rel=notnoopener must not satisfy the check: got %s, want FAIL", out.Status)
+	}
+}
+
 // AG-NET-08 must inspect Report-To / Reporting-Endpoints HEADERS, because the
 // CSP `report-to` directive carries GROUP NAMES that resolve via those
 // headers, not URLs. The old code treated group names as relative URLs and

@@ -337,29 +337,41 @@ func chkReportSameOrigin(_ context.Context, c *CheckCtx) Outcome {
 	return okay("reporting same-origin (or none)", "")
 }
 
-// AG-NET-09: external target=_blank links must sever window.opener — satisfied
-// by rel containing 'noopener' OR 'noreferrer' (noreferrer implies noopener per
-// the HTML spec). On privacy surfaces, rel must ALSO contain 'noreferrer'.
+// AG-NET-09: external target=_blank openers must sever window.opener —
+// satisfied by rel containing 'noopener' OR 'noreferrer' (noreferrer implies
+// noopener per the HTML spec). On privacy surfaces, rel must ALSO contain
+// 'noreferrer'. Applies to <a> AND <form> — form submissions with target=_blank
+// leak window.opener via the same mechanism (HTML §form-submission-algorithm).
 func chkNoopener(_ context.Context, c *CheckCtx) Outcome {
 	if c.Doc == nil {
 		return inconclusive("surface not fetched")
 	}
 	privacy := c.Surface.IsPrivacy()
-	for _, e := range collectEls(c.Doc.Body, "a") {
-		if !strings.EqualFold(e.attr["target"], "_blank") || !isExternal(c.Doc.FinalURL, e.attr["href"]) {
+
+	// hrefAttr returns the URL-carrying attribute for each opener element.
+	hrefAttr := func(tag string) string {
+		if tag == "form" {
+			return "action"
+		}
+		return "href"
+	}
+
+	for _, e := range collectEls(c.Doc.Body, "a", "form") {
+		href := e.attr[hrefAttr(e.tag)]
+		if !strings.EqualFold(e.attr["target"], "_blank") || !isExternal(c.Doc.FinalURL, href) {
 			continue
 		}
-		rel := strings.ToLower(e.attr["rel"])
-		hasNoopener := strings.Contains(rel, "noopener")
-		hasNoreferrer := strings.Contains(rel, "noreferrer")
+		rel := e.attr["rel"]
+		hasNoopener := relHas(rel, "noopener")
+		hasNoreferrer := relHas(rel, "noreferrer")
 		if !hasNoopener && !hasNoreferrer {
-			return bad("external _blank exposes opener: "+e.attr["href"], "rel contains 'noopener' or 'noreferrer'")
+			return bad("external _blank exposes opener ("+e.tag+"): "+href, "rel contains 'noopener' or 'noreferrer'")
 		}
 		if privacy && !hasNoreferrer {
-			return bad("privacy surface leaks referrer: "+e.attr["href"], "rel also contains 'noreferrer' on privacy surfaces")
+			return bad("privacy surface leaks referrer ("+e.tag+"): "+href, "rel also contains 'noreferrer' on privacy surfaces")
 		}
 	}
-	return okay("external _blank links sever the opener (and referrer on privacy surfaces)", "")
+	return okay("external _blank openers sever the opener (and referrer on privacy surfaces)", "")
 }
 
 // AG-CSP-01: a CSP is shipped (header or meta).
