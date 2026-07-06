@@ -222,6 +222,22 @@ func cspDoc(policy string) *CheckCtx {
 	return &CheckCtx{Doc: newDoc(200, "", map[string]string{"Content-Security-Policy": policy})}
 }
 
+// AG-NET-03 must walk worker-src → child-src → script-src → default-src per
+// CSP L3 §6.1. A policy that scopes default-src to 'none' but opens script-src
+// leaks WORKER load — old code missed it by short-circuiting to default-src.
+func TestChkWorkerSrcHonorsScriptSrcFallback(t *testing.T) {
+	c := cspDoc("default-src 'none'; script-src 'self' https://cdn.evil")
+	out := chkWorkerSrc(t.Context(), c)
+	if out.Status != Fail {
+		t.Errorf("worker-src via script-src fallback with third-party: got %s, want FAIL", out.Status)
+	}
+	// child-src short-circuits the chain: script-src being permissive is irrelevant.
+	c2 := cspDoc("default-src 'none'; child-src 'self'; script-src https://cdn.evil")
+	if out := chkWorkerSrc(t.Context(), c2); out.Status != Pass {
+		t.Errorf("child-src 'self' short-circuits worker-src: got %s, want PASS", out.Status)
+	}
+}
+
 // AG-NET-01 must reject a policy that only scopes some directives and leaves
 // the rest wide open. `script-src 'self'` with no default-src leaves img-src,
 // font-src, media-src, etc. at the browser default (*), which is a leak.

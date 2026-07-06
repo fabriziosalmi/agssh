@@ -119,19 +119,23 @@ func chkNoCDNLoaders(_ context.Context, c *CheckCtx) Outcome {
 	return okay("no public CDN loader references", "")
 }
 
-// AG-NET-03: worker-src is first-party only.
+// AG-NET-03: worker-src is first-party only. Per CSP L3 §6.1 worker-src falls
+// back to child-src, then script-src, then default-src — NOT straight to
+// default-src. A policy like `default-src 'none'; script-src https://cdn.evil`
+// resolves worker-src to script-src (third-party), which the plain Effective()
+// would miss.
 func chkWorkerSrc(_ context.Context, c *CheckCtx) Outcome {
 	if c.Doc == nil {
 		return inconclusive("surface not fetched")
 	}
 	pol, _ := docPolicy(c.Doc)
-	if vals, ok := pol.Effective("worker-src"); ok {
+	if vals, ok := pol.EffectiveWithFallback("worker-src"); ok {
 		if csp.SelfOnly(vals) {
 			return okay("worker-src self-only", "")
 		}
-		return bad("worker-src allows third-party", "worker-src 'self'/'none'")
+		return bad("worker-src allows third-party (via spec fallback chain)", "worker-src 'self'/'none'")
 	}
-	return bad("worker-src and default-src unset", "worker-src 'self'/'none'")
+	return bad("worker-src unresolvable: neither worker-src, child-src, script-src, nor default-src is set", "worker-src 'self'/'none'")
 }
 
 // AG-NET-04: connect-src 'none' (L0) or only the declared allow-list (L1).
