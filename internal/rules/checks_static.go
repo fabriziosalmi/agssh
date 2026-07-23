@@ -13,6 +13,7 @@ import (
 	"github.com/fabriziosalmi/agssh/internal/csp"
 	"github.com/fabriziosalmi/agssh/internal/httpx"
 	"golang.org/x/net/html"
+	"golang.org/x/net/publicsuffix"
 )
 
 // ---------- shared helpers ----------
@@ -68,6 +69,35 @@ func isExternal(surfaceURL, ref string) bool {
 	}
 	return !httpx.SameHost(surfaceURL, ref)
 }
+
+// sameSite reports whether ref sits under the SAME registrable domain (eTLD+1) as the
+// surface — the operator's own subdomain, not a third party.
+//
+// This never changes a verdict: cross-origin egress is still egress, the browser still
+// resolves and connects to another host, and at L0 that is a violation either way. It
+// changes what the finding SAYS. Reporting `radio.example.org` on `example.org` as a
+// "third-party CDN" is simply false, and this text ships in customer-facing reports —
+// a reviewer who spots one false statement discounts the whole report.
+func sameSite(surfaceURL, ref string) bool {
+	hs, ho := httpx.HostOf(surfaceURL), httpx.HostOf(ref)
+	if hs == "" || ho == "" {
+		return false
+	}
+	ds, err1 := publicsuffix.EffectiveTLDPlusOne(strings.ToLower(hs))
+	do, err2 := publicsuffix.EffectiveTLDPlusOne(strings.ToLower(ho))
+	if err1 != nil || err2 != nil {
+		return false // unknown suffix (IP literal, intranet name) — don't guess
+	}
+	return ds == do
+}
+
+// embedTags load another BROWSING CONTEXT rather than a subresource of this one: they
+// execute in their own origin, are sandbox-able, and CSP governs them through frame-src,
+// not script-src. An <iframe src="youtube.com"> on a page whose purpose is embedding a
+// video is a different claim from a <script src="cdn"> that runs in this origin — and
+// AG-NET-02's own title ("Override library default CDN loaders") is about the latter.
+// Both still fail the air-gap requirement; only the wording and the remedy differ.
+var embedTags = map[string]bool{"iframe": true, "embed": true, "object": true}
 
 var (
 	analyticsRe = regexp.MustCompile(`googletagmanager|google-analytics|gtag\s*\(|\b_gaq\b|\bG-[A-Z0-9]{10}\b|\bUA-[0-9]{4,}-[0-9]{1,4}\b`)
@@ -196,7 +226,17 @@ func chkNoCDNLoaders(_ context.Context, c *CheckCtx) Outcome {
 		if hostAllowed(httpx.HostOf(r.URL), allow) {
 			continue
 		}
-		return bad("external "+r.Tag+" subresource: "+r.URL, "self-hosted assets only (or an explicit allow.subresources entry at L1+)")
+		kind, remedy := "subresource", "self-hosted assets only (or an explicit allow.subresources entry at L1+)"
+		if embedTags[r.Tag] {
+			kind = "document embed"
+			remedy = "self-host the embedded document, or declare its host in allow.subresources at L1+"
+		}
+		party := "third-party"
+		if sameSite(c.Doc.FinalURL, r.URL) {
+			party = "cross-origin same-site (own registrable domain)"
+			remedy = "serve it same-origin, or declare the subdomain in allow.subresources at L1+"
+		}
+		return bad(party+" "+kind+" <"+r.Tag+">: "+r.URL, remedy)
 	}
 	return okay("no external subresource loaders", "")
 }

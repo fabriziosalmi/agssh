@@ -2,8 +2,10 @@ package rules
 
 import (
 	"context"
+	"strings"
 	"testing"
 
+	"github.com/fabriziosalmi/agssh/internal/httpx"
 	"github.com/fabriziosalmi/agssh/internal/manifest"
 )
 
@@ -181,6 +183,71 @@ func TestHardenedSurfacePassesHeaderFamily(t *testing.T) {
 	} {
 		if out := fn(context.Background(), c); out.Status != Pass {
 			t.Errorf("%s on hardened surface: got %s (%s), want PASS", name, out.Status, out.Evidence.Observed)
+		}
+	}
+}
+
+// ---- AG-NET-02 finding accuracy (2026-07-23 review round) ----
+//
+// Seven CRIT advisories in one queue said "third-party CDN" for, among others, a site's
+// OWN radio subdomain and for YouTube/Twitch iframes on pages that exist to embed them.
+// The verdicts were right; the sentences were not. These pin the wording.
+
+func netFindingFor(t *testing.T, surface, body string) Outcome {
+	t.Helper()
+	doc := &httpx.Doc{FinalURL: surface, Body: []byte(body)}
+	return chkNoCDNLoaders(context.Background(), &CheckCtx{Doc: doc, Level: 0})
+}
+
+func TestNoCDNLoaders_OwnSubdomainIsNotThirdParty(t *testing.T) {
+	out := netFindingFor(t, "https://freeundergroundtekno.org/radio/",
+		`<audio src="https://radio.freeundergroundtekno.org/stream"></audio>`)
+	if out.Status != Fail {
+		t.Fatalf("cross-origin egress must still FAIL at L0, got %s", out.Status)
+	}
+	if strings.Contains(out.Evidence.Observed, "third-party") {
+		t.Errorf("own subdomain reported as third-party: %q", out.Evidence.Observed)
+	}
+	if !strings.Contains(out.Evidence.Observed, "same-site") {
+		t.Errorf("want a same-site finding, got %q", out.Evidence.Observed)
+	}
+}
+
+func TestNoCDNLoaders_GenuineThirdPartyStillSaysThirdParty(t *testing.T) {
+	out := netFindingFor(t, "https://example.org/", `<script src="https://cdn.jsdelivr.net/x.js"></script>`)
+	if out.Status != Fail || !strings.Contains(out.Evidence.Observed, "third-party") {
+		t.Fatalf("want a third-party FAIL, got %s %q", out.Status, out.Evidence.Observed)
+	}
+	if !strings.Contains(out.Evidence.Observed, "subresource") {
+		t.Errorf("a <script src> is a subresource, got %q", out.Evidence.Observed)
+	}
+}
+
+func TestNoCDNLoaders_IframeIsReportedAsADocumentEmbed(t *testing.T) {
+	out := netFindingFor(t, "https://audiolibri.org/", `<iframe src="https://www.youtube.com/embed/x"></iframe>`)
+	if out.Status != Fail {
+		t.Fatalf("want FAIL, got %s", out.Status)
+	}
+	if !strings.Contains(out.Evidence.Observed, "document embed") {
+		t.Errorf("an <iframe> is a document embed, not a subresource: %q", out.Evidence.Observed)
+	}
+}
+
+func TestSameSite(t *testing.T) {
+	cases := []struct {
+		surface, ref string
+		want         bool
+	}{
+		{"https://example.org/", "https://radio.example.org/s", true},
+		{"https://www.example.org/", "https://cdn.example.org/x.js", true},
+		{"https://example.org/", "https://example.com/x.js", false},
+		{"https://example.co.uk/", "https://cdn.example.co.uk/x.js", true},
+		{"https://example.co.uk/", "https://evil.co.uk/x.js", false}, // co.uk is a public suffix
+		{"https://192.168.0.1/", "https://192.168.0.2/x.js", false},  // IP literals: don't guess
+	}
+	for _, c := range cases {
+		if got := sameSite(c.surface, c.ref); got != c.want {
+			t.Errorf("sameSite(%q, %q) = %v, want %v", c.surface, c.ref, got, c.want)
 		}
 	}
 }
