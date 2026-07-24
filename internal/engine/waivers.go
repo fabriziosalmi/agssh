@@ -19,7 +19,10 @@ func governance(cfg *manifest.Config, profile manifest.Profile, byID map[string]
 	now time.Time, approvers map[string]bool, author string) (gov []rules.Result, active map[string]bool, recs []report.WaiverRec, violations []string) {
 
 	active = map[string]bool{}
-	budget := cfg.Waivers.Budget
+	var budget manifest.WaiverBudget
+	if cfg.Waivers != nil {
+		budget = cfg.Waivers.Budget
+	}
 	maxWindow := budget.MaxWindowDays
 	if maxWindow <= 0 {
 		maxWindow = 30
