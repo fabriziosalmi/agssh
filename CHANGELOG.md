@@ -6,6 +6,21 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.2.1] — 2026-07-24
+
+### Fixed
+
+- **AG-NET-02: finding accuracy.** The verdict was right; the wording was not.
+  Egress from the site's *own* subdomain was reported as a "third-party CDN"
+  (host-exact comparison), and `<iframe>`/`<embed>`/`<object>` document embeds
+  were lumped in with in-origin subresources. A cross-origin URL under the same
+  registrable domain (eTLD+1, via `golang.org/x/net/publicsuffix`) is now
+  labelled "cross-origin same-site (own registrable domain)", and browsing-context
+  embeds are called "document embeds", not subresources. No verdict changes —
+  cross-origin egress still fails at L0; only the finding text and remedy differ.
+  This matters because the text ships in reports and a single false statement
+  discredits the whole report.
+
 ## [1.2.0] — 2026-07-06
 
 ### Fixed (adversarial review pass — AG-NET-* + AG-SUP-01)
@@ -168,7 +183,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - CI: build, `go vet`, `gofmt`, `go test -race`, spec↔runner skew enforcement, and
   a goreleaser release pipeline.
 
-[Unreleased]: https://github.com/fabriziosalmi/agssh/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/fabriziosalmi/agssh/compare/v1.2.1...HEAD
+[1.2.1]: https://github.com/fabriziosalmi/agssh/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/fabriziosalmi/agssh/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/fabriziosalmi/agssh/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/fabriziosalmi/agssh/releases/tag/v1.0.0
