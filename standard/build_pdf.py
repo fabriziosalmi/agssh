@@ -2,7 +2,7 @@
 # AGSSH-STD-001 v2.0 (draconian revision).
 # The YAML manifest + rule index + tooling appendix are all emitted from the
 # same RULES source, so normative text and machine-readable artifacts cannot drift.
-import calendar, html, os, re
+import calendar, datetime, html, os, re
 
 _here = os.path.dirname(os.path.abspath(__file__))
 
@@ -23,13 +23,17 @@ def _release_from_changelog():
         if not m:
             raise SystemExit("build_pdf: unparseable release heading in CHANGELOG.md: %r "
                              "(expected '## [X.Y.Z] — YYYY-MM-DD')" % ln)
-        month = int(m.group(3))
-        if not 1 <= month <= 12:
-            raise SystemExit("build_pdf: impossible month in CHANGELOG.md heading: %r" % ln)
-        epoch = calendar.timegm((int(m.group(2)), month, int(m.group(4)), 0, 0, 0))
+        try:
+            day = datetime.date(int(m.group(2)), int(m.group(3)), int(m.group(4)))
+        except ValueError:
+            # calendar.timegm would silently normalize e.g. 2026-02-31; a real
+            # date object refuses it, keeping the parse fail-closed.
+            raise SystemExit("build_pdf: impossible calendar date in CHANGELOG.md "
+                             "release heading: %r" % ln)
         return "v" + m.group(1), "%s %s" % (
             ("January","February","March","April","May","June","July","August",
-             "September","October","November","December")[month - 1], m.group(2)), epoch
+             "September","October","November","December")[day.month - 1], m.group(2)), \
+            calendar.timegm(day.timetuple())
     raise SystemExit("build_pdf: no dated release heading found in CHANGELOG.md")
 
 DOC_TITLE = "Air-Gapped Static Surface Hardening"
