@@ -1,5 +1,5 @@
 name: "AGSSH Conformance"
-description: "Deterministic, fail-closed conformance gate for air-gapped static surfaces (AGSSH-STD-001 v1.0.0)."
+description: "Deterministic, fail-closed conformance gate for air-gapped static surfaces (AGSSH-STD-001 v1.2.2)."
 author: "Fabrizio Salmi"
 branding:
   icon: "shield"
@@ -39,7 +39,7 @@ outputs:
 
 runs:
   using: "docker"
-  image: "docker://ghcr.io/fabriziosalmi/agssh:1.2.1"
+  image: "docker://ghcr.io/fabriziosalmi/agssh:1.2.2"
   args:
     - "-config=${{ inputs.config }}"
     - "-profile=${{ inputs.profile }}"

@@ -16,7 +16,9 @@ import (
 	"github.com/fabriziosalmi/agssh/internal/rules"
 )
 
-const docVersion = "v1.0.0"
+// docVersion is generated from CHANGELOG.md by standard/build_pdf.py so the
+// banner and the signed record can never drift from the project version.
+const docVersion = rules.StandardVersion
 
 type Options struct {
 	RepoDir      string

@@ -2,12 +2,43 @@
 # AGSSH-STD-001 v2.0 (draconian revision).
 # The YAML manifest + rule index + tooling appendix are all emitted from the
 # same RULES source, so normative text and machine-readable artifacts cannot drift.
-import html, re
+import calendar, datetime, html, os, re
+
+_here = os.path.dirname(os.path.abspath(__file__))
+
+def _release_from_changelog():
+    # DOC_VER/DOC_DATE derive from the newest dated release heading of
+    # CHANGELOG.md — the project version has a single source, never a hand copy.
+    # Fail closed: an unreadable file or a malformed heading aborts the build.
+    path = os.path.join(_here, "..", "CHANGELOG.md")
+    try:
+        with open(path, encoding="utf-8") as f:
+            lines = f.read().splitlines()
+    except OSError as e:
+        raise SystemExit("build_pdf: cannot read %s: %s" % (path, e))
+    for ln in lines:
+        if not ln.startswith("## [") or ln.startswith("## [Unreleased]"):
+            continue
+        m = re.fullmatch(r"## \[(\d+\.\d+\.\d+)\]\s*[—–-]\s*(\d{4})-(\d{2})-(\d{2})\s*", ln)
+        if not m:
+            raise SystemExit("build_pdf: unparseable release heading in CHANGELOG.md: %r "
+                             "(expected '## [X.Y.Z] — YYYY-MM-DD')" % ln)
+        try:
+            day = datetime.date(int(m.group(2)), int(m.group(3)), int(m.group(4)))
+        except ValueError:
+            # calendar.timegm would silently normalize e.g. 2026-02-31; a real
+            # date object refuses it, keeping the parse fail-closed.
+            raise SystemExit("build_pdf: impossible calendar date in CHANGELOG.md "
+                             "release heading: %r" % ln)
+        return "v" + m.group(1), "%s %s" % (
+            ("January","February","March","April","May","June","July","August",
+             "September","October","November","December")[day.month - 1], m.group(2)), \
+            calendar.timegm(day.timetuple())
+    raise SystemExit("build_pdf: no dated release heading found in CHANGELOG.md")
 
 DOC_TITLE = "Air-Gapped Static Surface Hardening"
 DOC_SUB   = "A Property-Based, Risk-Proportional Conformance Standard for Client-Side Tools, Docs &amp; Sites"
-DOC_VER   = "v1.0.0"
-DOC_DATE  = "June 2026"
+DOC_VER, DOC_DATE, _DOC_EPOCH = _release_from_changelog()
 DOC_AUTHOR= "Fabrizio Salmi"
 DOC_ID    = "AGSSH-STD-001"
 
@@ -43,7 +74,7 @@ RULES = [
    why="The third-party egress set of a surface is the UNION of every host it can reach: all CSP fetch-directive sources (script/style/img/font/media/connect/worker/frame/manifest/prefetch-src) plus every runtime sink (fetch, XHR, sendBeacon, EventSource, WebSocket, new Worker, importScripts, WebAssembly.instantiate*, dynamic import). For L0 that set MUST be a subset of {self}. The canonical breach is a browser OCR/codec engine fetched from a CDN on use — the document stays local, the engine does not.",
    check="egress = union(all CSP fetch-dir hosts, all runtime request hosts)\nassert egress ⊆ {self}      # not connect-src alone — the whole set",
    fix="Vendor all assets same-origin; ship the .wasm, workers and data packs from your own origin.",
-   tool="Playwright request capture + CSP parser"),
+   tool="chromedp request capture + CSP parser"),
   dict(id="AG-NET-02",title="Override library default CDN loaders",sev="CRITICAL",
    applies="MUST · L0 L1 L2",ct="static",
    why="Tesseract.js (workerPath/corePath/langPath → jsDelivr + the tessdata host), jsPDF (the pdfobject viewer → cdnjs), pdf.js workers and ML model loaders all fetch from a CDN by default unless explicitly repointed. The default is invisible egress that CSP-less testing never reveals until it fires.",
@@ -67,7 +98,7 @@ RULES = [
    why="The air-gap claim must be demonstrable, not asserted. A surface that 'should' work offline but was never tested with the network cut is an assumption.",
    check="headless load, abort ALL network after first paint, run the\nfunctional smoke test => success AND zero failed non-self requests",
    fix="Add a CI job that aborts every request post-load and asserts the core flow completes.",
-   tool="Playwright route abort"),
+   tool="chromedp request capture (offline proof)"),
   dict(id="AG-NET-06",title="No third-party connection priming",sev="MEDIUM",
    applies="MUST · L0 L1   (SHOULD · L2)",ct="static",
    why="preconnect/dns-prefetch/prefetch to third parties leak intent and warm tracker connections before the visitor interacts at all.",
@@ -79,7 +110,7 @@ RULES = [
    why="A service worker is persistent code that intercepts every request and can cache and replay responses. A compromised or over-scoped SW is a durable foothold that survives page reloads.",
    check="SW served same-origin ; narrowest scope ; fetch handlers contact\nonly self ; no remote importScripts ; cache stores only same-origin",
    fix="Register the narrowest scope; never importScripts a remote URL; restrict the cache to same-origin responses.",
-   tool="Playwright SW inspection"),
+   tool="chromedp SW inspection"),
   dict(id="AG-NET-08",title="Violation/error reporting stays same-origin",sev="MEDIUM",
    applies="MUST · L0 L1",ct="static",
    why="CSP report-to / Reporting-Endpoints / NEL pointed at a third-party SaaS collector silently re-introduces egress and ships metadata about every visitor and violation off-origin — defeating the air-gap through the back door.",
@@ -301,13 +332,13 @@ RULES = [
    why="The correct number of analytics providers on a privacy tool is zero. Anything else contradicts the claim the tool is built on.",
    check="zero analytics signatures AND zero third-party requests\n(subsumed by AG-NET-01)",
    fix="Remove analytics entirely; derive usage signal from edge logs you already control if you must.",
-   tool="Playwright request capture"),
+   tool="chromedp request capture"),
   dict(id="AG-PRV-02",title="Prior blocking of non-essential third parties",sev="CRITICAL",
    applies="MUST · L2 (and anywhere a tracker exists)",ct="dynamic",
    why="No analytics / ads / embeds / fonts may fire before explicit opt-in. EU law requires PRIOR blocking; exporting IPs to US analytics is a transfer-law exposure. Loading the tracker on page load and letting the visitor decline afterwards is the exact anti-pattern — the cookie is already set and the hit already sent.",
    check="first visit, NO consent cookie => zero requests to analytics/ad\nhosts AND zero non-essential cookies set",
    fix="Consent Mode with analytics_storage/ad_storage = denied by default, granted only after explicit consent; wire the banner's accept/decline to actually toggle loading. Or drop third-party analytics for an EU-hosted, cookieless one.",
-   tool="Playwright (no-consent first-visit capture)"),
+   tool="chromedp (no-consent first-visit capture)"),
   dict(id="AG-PRV-03",title="Self-host fonts",sev="HIGH",
    applies="MUST · L0 L1 L2",ct="static",
    why="Dynamically embedding Google Fonts has been ruled a privacy violation: it ships the visitor's IP to a third party on every load.",
@@ -319,19 +350,19 @@ RULES = [
    why="Storage and fingerprinting beyond functional need quietly erode the posture and the policy you publish.",
    check="enumerate cookies + localStorage on load against an allowlist ;\nnothing non-functional present",
    fix="Keep only what the tool needs; disclose any remaining storage.",
-   tool="Playwright storage inspection"),
+   tool="chromedp storage inspection"),
   dict(id="AG-PRV-05",title="Cookie attributes where cookies exist",sev="HIGH",
    applies="MUST · when any cookie is set",ct="dynamic",
    why="A cookie without Secure/HttpOnly/SameSite is interceptable, script-readable and CSRF-usable.",
    check="every cookie => Secure ; HttpOnly unless a script must read it ;\nSameSite=Lax|Strict ; __Host- prefix where applicable",
    fix="Set the full attribute set; prefer __Host- prefixed cookies.",
-   tool="Playwright cookie inspection"),
+   tool="chromedp cookie inspection"),
   dict(id="AG-PRV-06",title="Third-party embeds isolated and consent-gated",sev="MEDIUM",
    applies="MUST · L2   (forbidden · L0 L1)",ct="dynamic",
    why="An embedded video/map/widget sets third-party cookies and runs third-party code; on a privacy surface it is egress and tracking.",
    check="L0/L1 => zero third-party iframes ; L2 => embeds sandboxed,\nconsent-gated, privacy-mode variant or click-to-load facade",
    fix="Use no-cookie/privacy embeds behind a facade and consent; sandbox the iframe.",
-   tool="Playwright + DOM scan"),
+   tool="chromedp + DOM scan"),
  ]),
  ("§9","Output / Document Hygiene","AG-OUT",[
   dict(id="AG-OUT-01",title="Neutralize output metadata",sev="MEDIUM",
@@ -351,7 +382,7 @@ RULES = [
    why="The 'nothing is uploaded' claim must hold at the data-flow level: output is produced and delivered locally.",
    check="output delivered via Blob/object-URL ; no POST of user content\nin the processing path (subsumed by AG-NET-01/04)",
    fix="Generate and download client-side; remove any upload endpoint from the flow.",
-   tool="Playwright request capture"),
+   tool="chromedp request capture"),
  ]),
  ("§10","Governance &amp; Conformance Integrity","AG-GOV",[
   dict(id="AG-GOV-01",title="Waivers can never cover a MUST",sev="CRITICAL",
@@ -389,7 +420,7 @@ RULES = [
    why="Observing 'no egress during a test' proves a negative and is defeated by env-detecting, time-delayed or interaction-gated exfiltration. Instead the harness injects a known exfil probe and asserts the policy BLOCKS it — a positive test of a capability boundary that holds in production for every visitor regardless of attacker timing. CSP is the boundary; the canary proves it is real.",
    check="synthetic beacon to a non-allowlisted origin (fetch/img/beacon/ws)\nis blocked by CSP ; a violation is recorded ; production same-origin\nreporting is collecting",
    fix="Lock every fetch-directive to self (AG-NET-01); add the blocked-probe test; collect violation reports same-origin in production.",
-   tool="Playwright + injected probe + CSP report endpoint"),
+   tool="chromedp + injected probe + CSP report endpoint"),
   dict(id="AG-GOV-07",title="Build environment is ephemeral and hermetic",sev="HIGH",
    applies="MUST · L0 L1 L2 (Gold)",ct="static",
    why="A persistent build agent is a persistent foothold that can tamper outputs after the gate. A fresh isolated runner per build, a base image pinned by digest, and short-lived OIDC credentials shrink the window in which the host can forge results — and pair with external verification (AG-GOV-05) so tampering is contradicted by the production scan.",
@@ -510,7 +541,7 @@ grep -rEn 'uses:[^@]+@(?![0-9a-f]{40})' .github/workflows/    # unpinned Actions
 # ---------------------------------------------------------------- front matter / appendices (plain strings)
 FRONT = """
 <h2>§0 &nbsp;Normative Model, Profiles &amp; Assurance</h2>
-<div class="lead"><b>Versioning.</b> This standard follows Semantic Versioning: rule IDs are stable and never reused; adding a rule or profile is a MINOR release, tightening or removing a MUST is a MAJOR. <b>This is v1.0.0 — the first stable release</b>, incorporating the responses to an adversarial review: property-based conformance, containment-first verification, external signed attestation, governed waivers, and risk-proportional profiles.</div>
+<div class="lead"><b>Versioning.</b> This standard follows Semantic Versioning: rule IDs are stable and never reused; adding a rule or profile is a MINOR release, tightening or removing a MUST is a MAJOR. <b>This is __DOC_VER__</b>, incorporating the responses to an adversarial review: property-based conformance, containment-first verification, external signed attestation, governed waivers, and risk-proportional profiles.</div>
 
 <h3>Normative language</h3>
 <p><b>MUST</b>, <b>MUST NOT</b>, <b>SHOULD</b>, <b>SHOULD NOT</b> and <b>MAY</b> follow RFC&nbsp;2119 / RFC&nbsp;8174. A MUST is mandatory and <b>can never be waived</b> (AG-GOV-01). A SHOULD is strongly recommended; a deviation is permitted only under the waiver governance of §10 — bounded, expiring, attributable. There are no silent skips.</p>
@@ -546,6 +577,7 @@ FRONT = """
 <p>Rigidity that exhausts teams gets bypassed, so the standard mandates the labor-saving automation alongside the control: a bot keeps pinned Action SHAs current (AG-CI-01) so no one edits 40-character hashes by hand; CSP is staged report-only before enforcing (AG-CSP-04); and a conformant starter (the <code>_headers</code>, <code>.airgap.yml</code> and CI gate) ships green by default, making conformance the path of least resistance rather than an obstacle.</p>
 <p class="note">Public, vendor-neutral standard; §10 governs conformance integrity and §11 maps controls to backends. Legal references in Appendix&nbsp;E are informative, not legal advice.</p>
 """
+FRONT = FRONT.replace("__DOC_VER__", DOC_VER)
 
 APP_TOOL = """
 <h2>Appendix D &nbsp;Tooling Reference <span class="pfx">by check family</span></h2>
@@ -553,7 +585,7 @@ APP_TOOL = """
 <table class="grid"><thead><tr><th>Check family</th><th>Rules</th><th>Recommended tool(s)</th></tr></thead><tbody>
 <tr><td>Response headers</td><td>AG-HDR-01..05,07 · AG-NET-08</td><td><code>curl -I</code> + a header parser</td></tr>
 <tr><td>CSP directive predicates</td><td>AG-CSP-01..03,05,06 · AG-NET-03,04</td><td>a deterministic CSP parser</td></tr>
-<tr><td>Runtime egress / offline / SW / cookies / embeds / output</td><td>AG-NET-01,05,07 · AG-PRV-01,02,04,05,06 · AG-OUT-01..03</td><td>Playwright / Puppeteer (request &amp; storage capture)</td></tr>
+<tr><td>Runtime egress / offline / SW / cookies / embeds / output</td><td>AG-NET-01,05,07 · AG-PRV-01,02,04,05,06 · AG-OUT-01..03</td><td>chromedp (headless Chromium; request &amp; storage capture)</td></tr>
 <tr><td>Static bundle inspection</td><td>AG-NET-02 · AG-SUP-02,05</td><td>ripgrep over <code>dist/</code></td></tr>
 <tr><td>Secrets in build output</td><td>AG-SUP-04</td><td>gitleaks / trufflehog</td></tr>
 <tr><td>Vulnerable dependencies</td><td>AG-SUP-06</td><td>osv-scanner / trivy / npm audit</td></tr>
@@ -728,8 +760,6 @@ table.grid tr:nth-child(even) td {{ background:#f8fafc; }}
 
 </body></html>"""
 
-import os
-_here = os.path.dirname(os.path.abspath(__file__))
 html_path = os.path.join(_here, "AGSSH-STD-001-" + DOC_VER + ".html")
 pdf_path = os.path.join(_here, "AGSSH-STD-001-" + DOC_VER + ".pdf")
 with open(html_path, "w") as f:
@@ -751,7 +781,24 @@ with open(manifest_path, "w") as mf:
             mf.write("  - id: %s\n    family: %s\n    obligation: %s\n    severity: %s\n    profile: %s\n"
                      % (_r["id"], _fam, _ob, _r["sev"], PROF.get(_r["id"], "Gold")))
 print("manifest:", n_rules, "rules ->", os.path.relpath(manifest_path, _here))
+
+# --- generated Go constant: the runner's banner and signed conformance record
+# carry the same standard version as this document — derived from CHANGELOG.md
+# through this generator, never hand-bumped. CI diffs it like the manifest.
+version_go_path = os.path.join(_here, "..", "internal", "rules", "version_gen.go")
+with open(version_go_path, "w") as vf:
+    vf.write("// Code generated by standard/build_pdf.py from CHANGELOG.md — DO NOT EDIT.\n"
+             "// Regenerate: cd standard && python build_pdf.py\n\n"
+             "package rules\n\n"
+             "// StandardVersion is the AGSSH-STD-001 document version this build of the\n"
+             "// runner implements, derived from the newest CHANGELOG.md release heading.\n"
+             "const StandardVersion = \"" + DOC_VER + "\"\n")
+print("version:", DOC_VER, "->", os.path.relpath(version_go_path, _here))
 try:
+    # Byte-reproducible render (AG-OUT-02 applied to our own artifact): the PDF
+    # timestamp derives from the release date, so re-rendering the same release
+    # yields identical bytes. An explicit SOURCE_DATE_EPOCH still wins.
+    os.environ.setdefault("SOURCE_DATE_EPOCH", str(_DOC_EPOCH))
     from weasyprint import HTML as _WP
     _WP(html_path).write_pdf(pdf_path)
     print("wrote", pdf_path)
