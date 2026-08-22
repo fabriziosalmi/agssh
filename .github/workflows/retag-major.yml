@@ -2,11 +2,16 @@ name: retag-major
 
 # Moves the moving major tag (v1) onto the newest full-semver release tag, so
 # consumers of fabriziosalmi/agssh@v1 resolve the action.yml whose ghcr image
-# pin that release actually published. The target is DERIVED (newest semver
-# tag), never passed by hand, and every step fails closed: no semver tag, a
-# release commit unreachable from main, a missing ghcr image, or a post-push
-# mismatch aborts without (or before trusting) the ref move. On success it
-# prints an explicit verdict — it never passes silently.
+# pin that release actually published. Everything is DERIVED, nothing is an
+# input: the target is the newest vX.Y.Z tag (anchored filter — prereleases
+# like v1.3.0-rc.1 never qualify), and the image to verify is read from the
+# runs.image pin of action.yml AT that tag, not assumed from the tag name.
+# Every step fails closed: no release tag, a commit unreachable from main, an
+# unreadable/stale/foreign image pin, a missing ghcr image, a lost push lease,
+# or a post-push mismatch aborts — and success prints an explicit verdict, so
+# it never passes silently. Overlapping runs are serialized by a non-canceling
+# concurrency group, and the push is a compare-and-swap on the freshly read
+# remote ref (--force-with-lease), so an older run can never regress the tag.
 #
 # Entry points: called by release.yml after goreleaser + image succeed, or
 # dispatched manually (Actions → retag-major → Run workflow) for retroactive
@@ -23,6 +28,9 @@ permissions:
 jobs:
   retag:
     runs-on: ubuntu-latest
+    concurrency:
+      group: retag-major
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
         with:
@@ -30,31 +38,40 @@ jobs:
       - name: Move the moving major tag to the newest release tag
         run: |
           set -euo pipefail
-          latest=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -1)
-          [ -n "$latest" ] || { echo "::error::no full-semver tag found — nothing to point the major tag at"; exit 1; }
+          err() { echo "::error::$1"; exit 1; }
+          latest=$(git tag -l 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sed -n '1p' || true)
+          [ -n "$latest" ] || err "no full-semver release tag (vX.Y.Z) found — nothing to point the major tag at"
           target=$(git rev-parse "${latest}^{commit}")
           git merge-base --is-ancestor "$target" origin/main \
-            || { echo "::error::${latest} (${target}) is not reachable from main — refusing to move the major tag"; exit 1; }
+            || err "${latest} (${target}) is not reachable from main — refusing to move the major tag"
           major="${latest%%.*}"                     # v1.2.2 -> v1
-          echo "$major" | grep -Eq '^v[0-9]+$' \
-            || { echo "::error::derived major tag '${major}' is not vN — refusing"; exit 1; }
-          # The action.yml at $latest pins ghcr :X.Y.Z — verify that image exists
-          # before pointing @vN consumers at it (fail closed, not fail later).
-          ver="${latest#v}"
-          repo="${GITHUB_REPOSITORY,,}"
-          tok=$(curl -fsS "https://ghcr.io/token?scope=repository:${repo}:pull" | jq -r .token)
+          echo "$major" | grep -Eq '^v[0-9]+$' || err "derived major tag '${major}' is not vN — refusing"
+          # The load-bearing artifact for @vN consumers is the runs.image pin in
+          # action.yml AT the target tag — read it (never assume the convention
+          # held), require it to match the release, and require that exact image
+          # to exist before moving the tag.
+          img=$(git show "${latest}:action.yml" | sed -n 's|^[[:space:]]*image:[[:space:]]*"docker://\([^"]*\)".*|\1|p' | sed -n '1p' || true)
+          [ -n "$img" ] || err "cannot read the runs.image docker:// pin from action.yml at ${latest}"
+          reg="${img%%/*}"; path="${img#*/}"; irepo="${path%:*}"; iver="${path##*:}"
+          [ "$reg" = "ghcr.io" ] || err "action.yml at ${latest} pins registry '${reg}', expected ghcr.io — refusing"
+          [ "$iver" = "${latest#v}" ] \
+            || err "action.yml at ${latest} pins image :${iver} but the release is ${latest} — stale pin, fix the release before moving ${major}"
+          tok=$(curl -fsS "https://ghcr.io/token?scope=repository:${irepo}:pull" | jq -r .token)
           curl -fsS -o /dev/null \
             -H "Authorization: Bearer ${tok}" \
             -H "Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json" \
-            "https://ghcr.io/v2/${repo}/manifests/${ver}" \
-            || { echo "::error::ghcr.io/${repo}:${ver} not found — publish the release image before moving ${major}"; exit 1; }
-          current=$(git rev-parse -q --verify "refs/tags/${major}^{commit}" || true)
+            "https://ghcr.io/v2/${irepo}/manifests/${iver}" \
+            || err "ghcr.io/${irepo}:${iver} not found — publish the release image before moving ${major}"
+          # Freshly read remote SHA + force-with-lease = compare-and-swap; the
+          # concurrency group above already serializes overlapping runs.
+          current=$(git ls-remote origin "refs/tags/${major}" | cut -f1)
           if [ "${current}" = "${target}" ]; then
             echo "retag: OK — ${major} already points at ${latest} (${target}); nothing to do"
             exit 0
           fi
           git tag -f "${major}" "${target}"
-          git push -f origin "refs/tags/${major}"
+          git push --force-with-lease="refs/tags/${major}:${current}" origin "refs/tags/${major}" \
+            || err "push rejected: refs/tags/${major} moved on origin since it was read (lease failed) — re-run to converge"
           pushed=$(git ls-remote origin "refs/tags/${major}" | cut -f1)
-          [ "${pushed}" = "${target}" ] || { echo "::error::post-push verify failed: remote ${major}=${pushed}, expected ${target}"; exit 1; }
+          [ "${pushed}" = "${target}" ] || err "post-push verify failed: remote ${major}=${pushed}, expected ${target}"
           echo "retag: OK — ${major} -> ${latest} (${target}), verified on origin"
