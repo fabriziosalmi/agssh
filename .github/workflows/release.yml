@@ -56,3 +56,13 @@ jobs:
             ghcr.io/${{ github.repository_owner }}/agssh:${{ steps.v.outputs.ver }}
             ghcr.io/${{ github.repository_owner }}/agssh:${{ steps.v.outputs.major }}
             ghcr.io/${{ github.repository_owner }}/agssh:latest
+
+  retag-major:
+    # Only after BOTH the release artifacts and the image exist does the moving
+    # major git tag (v1) follow — so @v1 consumers never resolve an action.yml
+    # whose pinned image is not published yet. Logic lives in retag-major.yml
+    # (single source; also manually dispatchable for retroactive moves).
+    needs: [goreleaser, image]
+    permissions:
+      contents: write
+    uses: ./.github/workflows/retag-major.yml
