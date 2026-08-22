@@ -20,8 +20,8 @@ conforms to that standard.
 
 ## The standard
 
-[`standard/AGSSH-STD-001-v1.0.0.pdf`](standard/AGSSH-STD-001-v1.0.0.pdf) — 57
-rules across 9 families, three cumulative profiles (Gold superset of Silver
+<!-- agssh:std-headline -->[`standard/AGSSH-STD-001-v1.2.2.pdf`](standard/AGSSH-STD-001-v1.2.2.pdf) — 57 rules across 9 families<!-- /agssh:std-headline -->,
+three cumulative profiles (Gold superset of Silver
 superset of Bronze), assurance tiers (header / meta / runtime / structural),
 containment-first verification, governed waivers, and external signed
 attestation. Regenerate it with `cd standard && pip install weasyprint && python build_pdf.py`.
@@ -85,7 +85,7 @@ justification stays a human decision — the runner governs the mechanics only.
 | ci | workflow static analysis (pinning, permissions, untrusted code) | — |
 | engine | waiver governance, signing, hermetic-build hints | `cosign` (Gold) |
 
-All 57 rules are registered with full metadata; implemented checkers span every
+All <!-- agssh:n-rules -->57<!-- /agssh:n-rules --> rules are registered with full metadata; implemented checkers span every
 plane, including branch protection via the GitHub API (AG-CI-05) and runtime
 service-worker / client-storage inspection (AG-NET-07 / AG-PRV-04). The remaining
 rules whose verification is genuinely process-specific — reproducible-build

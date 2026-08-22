@@ -6,6 +6,36 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.2.2] — 2026-08-22
+
+### Fixed
+
+- **Generator ↔ hand-written drift.** The standard's document version and date
+  were hardcoded in `standard/build_pdf.py` (`v1.0.0` / `June 2026`) while the
+  project had moved on, so the committed PDF was still
+  `AGSSH-STD-001-v1.0.0.pdf` and the runner's banner/signed record carried a
+  third hand-written `v1.0.0`. `DOC_VER`/`DOC_DATE` now derive from this
+  CHANGELOG's newest release heading (fail-closed: a missing or malformed
+  heading aborts the build), the PDF is regenerated at the derived version —
+  byte-reproducibly, with `SOURCE_DATE_EPOCH` defaulted to the release date —
+  and the runner's standard-version constant is generated
+  (`internal/rules/version_gen.go`) from the same chain instead of hand-bumped.
+- **Documented tooling drift on the 10 dynamic rules.** The informative `tool=`
+  field of AG-NET-01/05/07, AG-PRV-01/02/04/05/06, AG-OUT-03 and AG-GOV-06
+  (plus the Appendix D tooling row) said "Playwright" while the runner does
+  headless verification via `chromedp` and ships no Node. Text-only alignment
+  of that field: no rule IDs, severities, profiles, obligations, `check=`,
+  `why=`, `fix=` texts or verdicts changed.
+
+### Added
+
+- `standard/sync_readme.py` — injects the generator-derived rule count, family
+  count, standard version and PDF filename into marker-delimited spans of
+  `README.md` / `standard/README.md` and into the version strings of
+  `action.yml` / `.airgap.yml`, so those values can no longer be hand-copied
+  and drift. Wired into CI in `--check` mode: fail-closed (a missing marker or
+  unparseable source fails the build) with an explicit verdict when in sync.
+
 ## [1.2.1] — 2026-07-24
 
 ### Fixed
@@ -183,7 +213,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - CI: build, `go vet`, `gofmt`, `go test -race`, spec↔runner skew enforcement, and
   a goreleaser release pipeline.
 
-[Unreleased]: https://github.com/fabriziosalmi/agssh/compare/v1.2.1...HEAD
+[Unreleased]: https://github.com/fabriziosalmi/agssh/compare/v1.2.2...HEAD
+[1.2.2]: https://github.com/fabriziosalmi/agssh/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/fabriziosalmi/agssh/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/fabriziosalmi/agssh/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/fabriziosalmi/agssh/compare/v1.0.0...v1.1.0

@@ -2,7 +2,8 @@ package rules
 
 import "github.com/fabriziosalmi/agssh/internal/manifest"
 
-// All returns every rule in AGSSH-STD-001 v1.0.0 with its metadata and checker.
+// All returns every rule in AGSSH-STD-001 (version: StandardVersion) with its
+// metadata and checker.
 // Rules with Plane==PlaneEngine carry a nil Check and are evaluated by the
 // engine itself (waiver governance, signing, hermetic-build hints).
 func All() []Rule {
