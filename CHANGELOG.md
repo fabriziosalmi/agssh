@@ -6,6 +6,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `retag-major` workflow: the moving `v1` tag now follows the newest release
+  automatically (chained after goreleaser + image publish in `release.yml`) or
+  via manual dispatch. Fail-closed: the target is derived (newest semver tag,
+  never an input), and it refuses to move if that tag is unreachable from
+  `main`, if the ghcr image the release pins does not exist yet, or if the
+  post-push re-read of the remote ref disagrees; idempotent when `v1` already
+  points at the newest release.
+
 ## [1.2.2] — 2026-08-22
 
 ### Fixed

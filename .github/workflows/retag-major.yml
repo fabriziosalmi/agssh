@@ -1,0 +1,60 @@
+name: retag-major
+
+# Moves the moving major tag (v1) onto the newest full-semver release tag, so
+# consumers of fabriziosalmi/agssh@v1 resolve the action.yml whose ghcr image
+# pin that release actually published. The target is DERIVED (newest semver
+# tag), never passed by hand, and every step fails closed: no semver tag, a
+# release commit unreachable from main, a missing ghcr image, or a post-push
+# mismatch aborts without (or before trusting) the ref move. On success it
+# prints an explicit verdict — it never passes silently.
+#
+# Entry points: called by release.yml after goreleaser + image succeed, or
+# dispatched manually (Actions → retag-major → Run workflow) for retroactive
+# moves. Pushing vN does not trigger the release workflow (its tag filter only
+# matches full X.Y.Z semver tags).
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: write
+
+jobs:
+  retag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Move the moving major tag to the newest release tag
+        run: |
+          set -euo pipefail
+          latest=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -1)
+          [ -n "$latest" ] || { echo "::error::no full-semver tag found — nothing to point the major tag at"; exit 1; }
+          target=$(git rev-parse "${latest}^{commit}")
+          git merge-base --is-ancestor "$target" origin/main \
+            || { echo "::error::${latest} (${target}) is not reachable from main — refusing to move the major tag"; exit 1; }
+          major="${latest%%.*}"                     # v1.2.2 -> v1
+          echo "$major" | grep -Eq '^v[0-9]+$' \
+            || { echo "::error::derived major tag '${major}' is not vN — refusing"; exit 1; }
+          # The action.yml at $latest pins ghcr :X.Y.Z — verify that image exists
+          # before pointing @vN consumers at it (fail closed, not fail later).
+          ver="${latest#v}"
+          repo="${GITHUB_REPOSITORY,,}"
+          tok=$(curl -fsS "https://ghcr.io/token?scope=repository:${repo}:pull" | jq -r .token)
+          curl -fsS -o /dev/null \
+            -H "Authorization: Bearer ${tok}" \
+            -H "Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json" \
+            "https://ghcr.io/v2/${repo}/manifests/${ver}" \
+            || { echo "::error::ghcr.io/${repo}:${ver} not found — publish the release image before moving ${major}"; exit 1; }
+          current=$(git rev-parse -q --verify "refs/tags/${major}^{commit}" || true)
+          if [ "${current}" = "${target}" ]; then
+            echo "retag: OK — ${major} already points at ${latest} (${target}); nothing to do"
+            exit 0
+          fi
+          git tag -f "${major}" "${target}"
+          git push -f origin "refs/tags/${major}"
+          pushed=$(git ls-remote origin "refs/tags/${major}" | cut -f1)
+          [ "${pushed}" = "${target}" ] || { echo "::error::post-push verify failed: remote ${major}=${pushed}, expected ${target}"; exit 1; }
+          echo "retag: OK — ${major} -> ${latest} (${target}), verified on origin"
