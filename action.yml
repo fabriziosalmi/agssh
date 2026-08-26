@@ -1,5 +1,5 @@
 name: "AGSSH Conformance"
-description: "Deterministic, fail-closed conformance gate for air-gapped static surfaces (AGSSH-STD-001 v1.2.2)."
+description: "Deterministic, fail-closed conformance gate for air-gapped static surfaces (AGSSH-STD-001 v1.3.0)."
 author: "Fabrizio Salmi"
 branding:
   icon: "shield"
@@ -30,6 +30,10 @@ inputs:
     description: "Conformance record output path (JSON)."
     required: false
     default: "agssh-report.json"
+  badge:
+    description: "Write a self-hosted SVG conformance badge to this path. Empty = no badge."
+    required: false
+    default: ""
 
 outputs:
   conformant:
@@ -39,7 +43,7 @@ outputs:
 
 runs:
   using: "docker"
-  image: "docker://ghcr.io/fabriziosalmi/agssh:1.2.2"
+  image: "docker://ghcr.io/fabriziosalmi/agssh:1.3.0"
   args:
     - "-config=${{ inputs.config }}"
     - "-profile=${{ inputs.profile }}"
@@ -47,5 +51,6 @@ runs:
     - "-sign=${{ inputs.sign }}"
     - "-author=${{ inputs.author }}"
     - "-out=${{ inputs.out }}"
+    - "-badge=${{ inputs.badge }}"
     - "-repo=."
     - "-workflows=.github/workflows"
