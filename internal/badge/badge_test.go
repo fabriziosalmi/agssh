@@ -46,9 +46,10 @@ func TestRenderIsSelfContainedAndClipped(t *testing.T) {
 			t.Errorf("badge must be self-contained; found %q", bad)
 		}
 	}
-	// The text group must be clipped so a wide fallback font cannot overflow.
-	if strings.Count(svg, `clip-path="url(#r)"`) < 2 {
-		t.Errorf("both the rect group and the text group must be clipped to the badge bounds")
+	// The rect group is clipped to the badge outline, and each chip's text is
+	// clipped to its own chip, so a label can never overflow on any font.
+	if !strings.Contains(svg, `clip-path="url(#r)"`) || !strings.Contains(svg, `clip-path="url(#c0)"`) {
+		t.Errorf("rects must clip to the outline and each text run to its own chip")
 	}
 }
 

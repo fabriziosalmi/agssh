@@ -154,26 +154,27 @@ func profileOr(p, def string) string {
 	return p
 }
 
-// buildSegments assembles a flat, N-segment badge. The text group is clipped to
-// the badge bounds, so a wide fallback font can never let a label spill past its
-// chip; widths are estimated from a coarse Verdana metric with generous padding.
+// buildSegments assembles a flat, N-segment badge with even padding. Each chip is
+// sized to its text using EXACT Verdana advance widths (Verdana is the widest of
+// the declared stack — DejaVu/generic fall inside it), and each chip's text is
+// clipped to its own rect, so a label can never spill past its chip on any font.
 func buildSegments(segs []segment) []byte {
 	const (
 		h   = 20
-		pad = 8.0
+		pad = 6 // px each side of a chip's text — tight, even, shields-like
 	)
-	// Measure each segment.
-	widths := make([]float64, len(segs))
-	total := 0.0
+	widths := make([]int, len(segs))
+	total := 0
 	for i, s := range segs {
-		widths[i] = textWidth(s.text) + 2*pad
+		widths[i] = int(mathRound(textWidth(s.text))) + 2*pad
 		total += widths[i]
 	}
 
-	var defs, rects, texts strings.Builder
+	var defs, body strings.Builder
 	defs.WriteString(`<linearGradient id="s" x2="0" y2="100%"><stop offset="0" stop-color="#bbb" stop-opacity=".1"/><stop offset="1" stop-opacity=".1"/></linearGradient>`)
-
-	x := 0.0
+	// Rects (clipped to the rounded badge outline).
+	body.WriteString(`<g clip-path="url(#r)">`)
+	x := 0
 	for i, s := range segs {
 		fill := s.solid
 		if s.gradTop != "" {
@@ -181,32 +182,37 @@ func buildSegments(segs []segment) []byte {
 			fmt.Fprintf(&defs, `<linearGradient id="%s" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="%s"/><stop offset="1" stop-color="%s"/></linearGradient>`, gid, s.gradTop, s.gradBot)
 			fill = "url(#" + gid + ")"
 		}
-		fmt.Fprintf(&rects, `<rect x="%.1f" width="%.1f" height="%d" fill="%s"/>`, x, widths[i], h, fill)
-
+		fmt.Fprintf(&defs, `<clipPath id="c%d"><rect x="%d" width="%d" height="%d"/></clipPath>`, i, x, widths[i], h)
+		fmt.Fprintf(&body, `<rect x="%d" width="%d" height="%d" fill="%s"/>`, x, widths[i], h, fill)
+		x += widths[i]
+	}
+	fmt.Fprintf(&body, `<rect width="%d" height="%d" fill="url(#s)"/>`, total, h)
+	body.WriteString(`</g>`)
+	// Text — each run clipped to its own chip.
+	body.WriteString(`<g text-anchor="middle" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" text-rendering="geometricPrecision" font-size="110">`)
+	x = 0
+	for i, s := range segs {
 		cx := (x + widths[i]/2) * 10
 		shColor, shOp := "#010101", ".3"
 		if s.dark {
 			shColor, shOp = colWhite, ".5"
 		}
-		fmt.Fprintf(&texts, `<text transform="scale(.1)" x="%.0f" y="150" fill="%s" fill-opacity="%s">%s</text>`, cx, shColor, shOp, esc(s.text))
-		fmt.Fprintf(&texts, `<text transform="scale(.1)" x="%.0f" y="140" fill="%s">%s</text>`, cx, s.textCol, esc(s.text))
+		fmt.Fprintf(&body, `<g clip-path="url(#c%d)">`, i)
+		fmt.Fprintf(&body, `<text transform="scale(.1)" x="%d" y="150" fill="%s" fill-opacity="%s">%s</text>`, cx, shColor, shOp, esc(s.text))
+		fmt.Fprintf(&body, `<text transform="scale(.1)" x="%d" y="140" fill="%s">%s</text>`, cx, s.textCol, esc(s.text))
+		body.WriteString(`</g>`)
 		x += widths[i]
 	}
+	body.WriteString(`</g>`)
 
 	var b strings.Builder
 	label := aria(segs)
-	fmt.Fprintf(&b, `<svg xmlns="http://www.w3.org/2000/svg" width="%.0f" height="%d" role="img" aria-label="%s">`, total, h, esc(label))
+	fmt.Fprintf(&b, `<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d" role="img" aria-label="%s">`, total, h, esc(label))
 	fmt.Fprintf(&b, `<title>%s</title>`, esc(label))
 	b.WriteString(defs.String())
-	fmt.Fprintf(&b, `<clipPath id="r"><rect width="%.0f" height="%d" rx="3" fill="#fff"/></clipPath>`, total, h)
-	b.WriteString(`<g clip-path="url(#r)">`)
-	b.WriteString(rects.String())
-	fmt.Fprintf(&b, `<rect width="%.0f" height="%d" fill="url(#s)"/>`, total, h)
-	b.WriteString(`</g>`)
-	// Clip the text too: a wide fallback font is contained, never overflowing.
-	b.WriteString(`<g clip-path="url(#r)" text-anchor="middle" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" text-rendering="geometricPrecision" font-size="110">`)
-	b.WriteString(texts.String())
-	b.WriteString(`</g></svg>`)
+	fmt.Fprintf(&b, `<clipPath id="r"><rect width="%d" height="%d" rx="3" fill="#fff"/></clipPath>`, total, h)
+	b.WriteString(body.String())
+	b.WriteString(`</svg>`)
 	b.WriteString("\n")
 	return []byte(b.String())
 }
@@ -219,25 +225,31 @@ func aria(segs []segment) string {
 	return strings.Join(parts, ": ")
 }
 
-// textWidth estimates a string's rendered width in px at font-size 11. Generous
-// on purpose: with the text clipped to the badge, over-estimating only pads a
-// chip slightly, whereas under-estimating would crowd a long label.
+func mathRound(f float64) float64 { return math.Floor(f + 0.5) }
+
+// verdanaAdvance holds the exact Verdana glyph advance at font-size 11px (measured
+// via canvas measureText). Verdana is declared first and is the widest of the
+// stack, so sizing to it keeps every label inside its chip on DejaVu Sans and the
+// generic sans fallback too. Unlisted runes fall back to a safe wide default.
+var verdanaAdvance = map[rune]float64{
+	'0': 6.99, '1': 6.99, '2': 6.99, '3': 6.99, '4': 6.99, '5': 6.99, '6': 6.99, '7': 6.99, '8': 6.99, '9': 6.99,
+	'A': 7.52, 'B': 7.54, 'C': 7.68, 'D': 8.48, 'E': 6.96, 'F': 6.32, 'G': 8.53, 'H': 8.27, 'I': 4.63, 'J': 5,
+	'K': 7.62, 'L': 6.12, 'M': 9.27, 'N': 8.23, 'O': 8.66, 'P': 6.63, 'Q': 8.66, 'R': 7.65, 'S': 7.52, 'T': 6.78,
+	'U': 8.05, 'V': 7.52, 'W': 10.88, 'X': 7.54, 'Y': 6.77, 'Z': 7.54,
+	'a': 6.61, 'b': 6.85, 'c': 5.73, 'd': 6.85, 'e': 6.55, 'f': 3.87, 'g': 6.85, 'h': 6.96, 'i': 3.02, 'j': 3.79,
+	'k': 6.51, 'l': 3.02, 'm': 10.7, 'n': 6.96, 'o': 6.68, 'p': 6.85, 'q': 6.85, 'r': 4.69, 's': 5.73, 't': 4.33,
+	'u': 6.96, 'v': 6.51, 'w': 9, 'x': 6.51, 'y': 6.51, 'z': 5.78,
+	'%': 11.84, '·': 4, ' ': 3.87, '/': 5, '.': 3.87, '-': 5,
+}
+
+// textWidth is the exact Verdana rendered width of s at font-size 11px.
 func textWidth(s string) float64 {
 	w := 0.0
 	for _, r := range s {
-		switch {
-		case strings.ContainsRune("iIl.,:;'|!()[]{} ", r):
-			w += 4.0
-		case strings.ContainsRune("fjrt", r):
-			w += 5.4
-		case strings.ContainsRune("mwMW@%", r):
-			w += 11.5
-		case r >= 'A' && r <= 'Z':
-			w += 8.8
-		case r == '·':
-			w += 4.6
-		default:
-			w += 7.8
+		if a, ok := verdanaAdvance[r]; ok {
+			w += a
+		} else {
+			w += 8.0 // safe wide default for an unlisted glyph
 		}
 	}
 	return w
