@@ -35,6 +35,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   record. Ships in every release archive; register with
   `claude mcp add agssh -- agssh-mcp` (a repo `.mcp.json` is provided).
 
+- **Self-hosted conformance badge (`-badge out.svg`).** A dependency-free,
+  egress-free SVG badge (no web font, no external image, no third-party
+  endpoint) that a project serves from its own origin — it cannot violate the
+  AG-NET-02 it advertises. It is a deterministic pure function of the record:
+  **conformant** shows the earned tier as its metal (`AGSSH · Gold`, a
+  reproducible fail-closed claim); **non-conformant** shows the grey *target*
+  tier plus the weighted score (`AGSSH · Gold · 41%`) — the medal is the claim,
+  the score a development diagnostic. New `internal/badge` package.
+
 ### Security
 
 - **`agssh_scan` refuses non-public targets by default (SSRF).** Because the URL

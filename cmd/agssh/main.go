@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/fabriziosalmi/agssh/internal/badge"
 	"github.com/fabriziosalmi/agssh/internal/engine"
 	"github.com/fabriziosalmi/agssh/internal/httpx"
 	"github.com/fabriziosalmi/agssh/internal/manifest"
@@ -41,6 +42,7 @@ func main() {
 	approversPath := flag.String("approvers", "", "file with one approved waiver-approver per line")
 	timeout := flag.Duration("timeout", 45*time.Second, "per-check timeout")
 	resolver := flag.String("resolver", "", "DNS resolver host[:port] for CAA/DNSSEC/dangling (default: host resolv.conf)")
+	badgePath := flag.String("badge", "", "write a self-hosted SVG conformance badge to this path")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
 
@@ -98,6 +100,17 @@ func main() {
 		if !rec.Conformant {
 			allConformant = false
 		}
+	}
+
+	// A self-hosted SVG conformance badge for the whole config: the earned metal
+	// tier when every surface is conformant (mirrors the gate), otherwise the grey
+	// target tier plus the score. Egress-free, so a project can serve it from its
+	// own origin without breaking its own AG-NET-02.
+	if *badgePath != "" {
+		if e := os.WriteFile(*badgePath, badge.RenderAggregate(records), 0o644); e != nil {
+			fail(e)
+		}
+		fmt.Fprintf(os.Stderr, "badge written: %s\n", filepath.Clean(*badgePath))
 	}
 
 	if *out != "-" {
