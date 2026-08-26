@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "agssh": {
+      "command": "agssh-mcp",
+      "args": [],
+      "env": {}
+    }
+  }
+}

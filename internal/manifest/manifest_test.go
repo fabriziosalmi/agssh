@@ -7,6 +7,30 @@ import (
 	"time"
 )
 
+func TestValidateAllow(t *testing.T) {
+	bad := []Allow{
+		{Connect: []string{"*"}},
+		{Subresources: []string{"cdn.example.com", "*.evil.com"}},
+		{Embeds: []string{"*"}},
+		{Storage: []string{"*"}},
+	}
+	for _, a := range bad {
+		if err := ValidateAllow(a); err == nil {
+			t.Errorf("ValidateAllow(%+v) = nil, want a wildcard rejection", a)
+		}
+	}
+	ok := []Allow{
+		{},
+		{Connect: []string{"https://api.example.com"}},
+		{Subresources: []string{"cdn.example.com"}, Storage: []string{"theme", "lang"}},
+	}
+	for _, a := range ok {
+		if err := ValidateAllow(a); err != nil {
+			t.Errorf("ValidateAllow(%+v) = %v, want nil", a, err)
+		}
+	}
+}
+
 func TestParseProfileAndLevel(t *testing.T) {
 	for s, want := range map[string]Profile{"": Bronze, "bronze": Bronze, "Silver": Silver, "GOLD": Gold} {
 		if got, err := ParseProfile(s); err != nil || got != want {

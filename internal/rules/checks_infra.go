@@ -368,15 +368,50 @@ func chkNoSecrets(ctx context.Context, c *CheckCtx) Outcome {
 		return inconclusive("gitleaks not found on PATH")
 	}
 	dir := c.DistDir
-	if _, err := os.Stat(dir); err != nil {
+	if !dirExists(dir) {
 		dir = c.RepoDir
 	}
-	cmd := exec.CommandContext(ctx, c.Tools.Gitleaks, "detect", "--no-banner", "--no-git", "--source", dir)
-	out, err := cmd.CombinedOutput()
-	if err == nil {
+	if !dirExists(dir) {
+		// No artifact/repo to inspect (e.g. a URL-only scan): we cannot prove the
+		// shipped output is secret-free, so fail-closed to INCONCLUSIVE — never
+		// scan the process's working directory by accident.
+		return inconclusive("no dist/repo directory to scan for secrets")
+	}
+	// gitleaks exits 1 for BOTH "leaks found" and some fatal scan errors (an
+	// unreadable file, a malformed .gitleaks.toml), so the exit code alone cannot
+	// tell a real finding from a broken run. Take the verdict from the JSON report
+	// instead: findings present -> FAIL; an empty report (or a clean exit with no
+	// report) -> PASS; no parseable report on a non-zero exit -> INCONCLUSIVE. A
+	// tool that could not run must never manufacture a secret.
+	report, err := os.CreateTemp("", "agssh-gitleaks-*.json")
+	if err != nil {
+		return inconclusive("cannot create gitleaks report file: " + err.Error())
+	}
+	reportPath := report.Name()
+	report.Close()
+	defer os.Remove(reportPath)
+
+	cmd := exec.CommandContext(ctx, c.Tools.Gitleaks, "detect", "--no-banner", "--no-git",
+		"--source", dir, "--report-format", "json", "--report-path", reportPath)
+	out, runErr := cmd.CombinedOutput()
+
+	data, _ := os.ReadFile(reportPath)
+	if trimmed := bytes.TrimSpace(data); len(trimmed) > 0 {
+		var findings []json.RawMessage
+		if json.Unmarshal(trimmed, &findings) != nil {
+			return inconclusive("gitleaks report not parseable: " + lastLine(out))
+		}
+		if len(findings) > 0 {
+			return bad(fmt.Sprintf("gitleaks flagged %d secret(s)", len(findings)), "no secrets in shipped output")
+		}
 		return okay("gitleaks: no secrets", "")
 	}
-	return bad("gitleaks flagged secrets: "+lastLine(out), "no secrets in shipped output")
+	// No report written. A clean exit means nothing to report; a non-zero exit
+	// means the scan itself failed.
+	if runErr == nil {
+		return okay("gitleaks: no secrets", "")
+	}
+	return inconclusive("gitleaks did not complete: " + lastLine(out))
 }
 
 // AG-SUP-05: no source maps in the shipped artifact.
@@ -408,6 +443,11 @@ func chkNoSourceMaps(_ context.Context, c *CheckCtx) Outcome {
 func chkNoKnownVulns(ctx context.Context, c *CheckCtx) Outcome {
 	if c.Tools.OSVScanner == "" {
 		return inconclusive("osv-scanner not found on PATH")
+	}
+	if !dirExists(c.RepoDir) {
+		// No repository to scan (e.g. a URL-only scan). Refuse to let osv-scanner
+		// fall back to the process working directory ("" scans '.').
+		return inconclusive("no repository directory to scan for known vulnerabilities")
 	}
 	cmd := exec.CommandContext(ctx, c.Tools.OSVScanner, "--format=json", "--recursive", c.RepoDir)
 	var stdout, stderr bytes.Buffer
@@ -475,7 +515,18 @@ func parseOSVResults(jsonOut []byte) (count int, ids []string, ok bool) {
 // AG-SUP-07: an SBOM is produced and retained.
 func chkSBOM(_ context.Context, c *CheckCtx) Outcome {
 	patterns := []string{"*.spdx.json", "*.cdx.json", "sbom.json", "bom.json", "*.sbom"}
+	roots := make([]string, 0, 2)
 	for _, root := range []string{c.DistDir, c.RepoDir} {
+		if dirExists(root) {
+			roots = append(roots, root)
+		}
+	}
+	if len(roots) == 0 {
+		// No dist/repo to inspect (e.g. a URL-only scan) — we cannot prove an SBOM
+		// exists or is absent, so fail-closed to INCONCLUSIVE rather than FAIL.
+		return inconclusive("no dist/repo directory to scan for an SBOM")
+	}
+	for _, root := range roots {
 		for _, pat := range patterns {
 			matches, _ := filepath.Glob(filepath.Join(root, pat))
 			if len(matches) > 0 {
@@ -484,6 +535,17 @@ func chkSBOM(_ context.Context, c *CheckCtx) Outcome {
 		}
 	}
 	return bad("no SBOM artifact found", "an SPDX/CycloneDX SBOM retained with the build")
+}
+
+// dirExists reports whether p names an existing directory. An empty path is
+// never a directory — guarding on it keeps filepath.Join(p, name) from
+// collapsing to a working-directory-relative read.
+func dirExists(p string) bool {
+	if strings.TrimSpace(p) == "" {
+		return false
+	}
+	fi, err := os.Stat(p)
+	return err == nil && fi.IsDir()
 }
 
 func lastLine(b []byte) string {

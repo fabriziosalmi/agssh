@@ -19,6 +19,57 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   concurrency group, re-read and verified after pushing; idempotent when `v1`
   already points at the newest release.
 
+- **`agssh-mcp` — the runner as an MCP server.** AGSSH is now exposed over the
+  [Model Context Protocol](https://modelcontextprotocol.io) on stdio, so an agent
+  can scan a surface without the build/config/parse dance. It reuses the engine
+  **in-process** — no shell-out, no temp files — via a new `internal/mcpsrv`
+  package. Three read-only tools:
+  - `agssh_scan` — evaluate a **live URL**; the manifest is synthesized from the
+    arguments (`url`, `profile`, `level`, `kind`, `allow_*`, surface flags). Rules
+    that need a source tree report `INCONCLUSIVE`.
+  - `agssh_scan_config` — full CLI parity against an existing `.airgap.yml`
+    (repo / dist / workflow rules against real paths).
+  - `agssh_list_rules` — registry introspection, filterable by family/profile.
+
+  Each scan returns a human summary **and** the full structured conformance
+  record. Ships in every release archive; register with
+  `claude mcp add agssh -- agssh-mcp` (a repo `.mcp.json` is provided).
+
+### Security
+
+- **`agssh_scan` refuses non-public targets by default (SSRF).** Because the URL
+  is caller-supplied, the server no longer fetches or headless-browses
+  loopback, link-local (incl. cloud metadata `169.254.169.254`), RFC1918/private,
+  unique-local, CGNAT, NAT64 or `0.0.0.0/8` addresses unless the caller sets
+  `allow_private_targets`. The block runs at **dial time on the resolved IP**, so
+  it also covers redirects and DNS-rebinding; the caller-supplied DNS `resolver`
+  is guarded the same way. `agssh_scan_config` keeps CLI trust (operator-authored
+  manifest).
+- **Wildcard allow-lists are rejected.** A `"*"` in `allow.connect` /
+  `allow.subresources` / `allow.embeds` / `allow.storage` would make the
+  allow-list disable the very check it scopes (a false PASS at L1+). It is now
+  refused at manifest load and by the MCP tools — the standard already requires
+  explicit origins, "never '*'".
+
+### Fixed
+
+- **AG-SUP-04: a gitleaks *scan error* is no longer reported as a secret.**
+  gitleaks exits `1` both when it finds leaks and on a fatal error (unreadable
+  file, malformed `.gitleaks.toml`), so the exit code alone conflated the two.
+  The verdict now comes from the JSON report: findings → FAIL, empty → PASS, no
+  parseable report on a non-zero exit → INCONCLUSIVE. A tool that could not run
+  never manufactures a MUST failure.
+- **No working-directory fallback for source-plane scanners.** With no source
+  tree (a URL-only scan), `chkNoSecrets`, `chkNoKnownVulns` and `chkSBOM` now
+  report `INCONCLUSIVE` instead of a false FAIL, and can no longer let
+  `gitleaks` / `osv-scanner` / glob checks silently inspect the process working
+  directory. `agssh_scan` anchors the repo/dist/workflow roots to a
+  guaranteed-absent absolute path and scrubs it from the emitted evidence.
+- **`agssh_scan_config` headline verdict is the AND of every surface**, matching
+  the CLI gate — a conformant first surface no longer masks a failing second; the
+  detailed fix queue is drawn from the first failing surface, with a per-surface
+  roster alongside.
+
 ## [1.2.2] — 2026-08-22
 
 ### Fixed
