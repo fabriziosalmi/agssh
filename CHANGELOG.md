@@ -6,6 +6,28 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.3.1] — 2026-08-27
+
+### Fixed
+
+- **AG-PRV-03 (self-host fonts) no longer false-positives on prose.** The checker
+  substring-matched the body for a font-CDN host, so any page whose *text*
+  mentioned `fonts.googleapis.com` failed — including the AGSSH standard document,
+  which names the host when describing this very rule. It is now HTML-aware: it
+  flags a stylesheet/preconnect to a font CDN, a cross-origin
+  `<link rel=preload as=font>`, or an `@font-face` src at a cross-origin font
+  file — never prose. (Same class of bug as the 1.2.0 AG-NET-02 rewrite.)
+
+### Security
+
+- **No known-vulnerable dependencies.** `golang.org/x/mod` bumped to v0.40.0,
+  clearing GO-2026-6179 / GO-2026-6180 (pulled in transitively with the MCP SDK).
+- **The runner's own CI Actions are pinned to 40-char SHAs (AG-CI-01)** across
+  `ci.yml`, `release.yml` and `retag-major.yml` — agssh now practises the pinning
+  it enforces.
+
+Found by dogfooding agssh at Gold against its own repo and rendered standard.
+
 ## [1.3.0] — 2026-08-27
 
 ### Added
@@ -288,7 +310,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - CI: build, `go vet`, `gofmt`, `go test -race`, spec↔runner skew enforcement, and
   a goreleaser release pipeline.
 
-[Unreleased]: https://github.com/fabriziosalmi/agssh/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/fabriziosalmi/agssh/compare/v1.3.1...HEAD
+[1.3.1]: https://github.com/fabriziosalmi/agssh/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/fabriziosalmi/agssh/compare/v1.2.2...v1.3.0
 [1.2.2]: https://github.com/fabriziosalmi/agssh/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/fabriziosalmi/agssh/compare/v1.2.0...v1.2.1

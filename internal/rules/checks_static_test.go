@@ -173,6 +173,31 @@ func TestChkCookieAttrs(t *testing.T) {
 	}
 }
 
+func TestChkSelfHostFonts(t *testing.T) {
+	surf := "https://example.org/"
+	cases := []struct {
+		name, body string
+		want       Status
+	}{
+		// The regression: prose that merely NAMES a font host (as the AGSSH
+		// standard document does when describing this very rule) must PASS.
+		{"prose mentions the font host", `<pre>zero fonts.googleapis.com / fonts.gstatic.com references</pre>` +
+			`<div>Self-host WOFF2 files in @font-face with font-src 'self'.</div>`, Pass},
+		{"third-party font stylesheet", `<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter">`, Fail},
+		{"preconnect to a font CDN", `<link rel="preconnect" href="https://fonts.gstatic.com">`, Fail},
+		{"cross-origin @font-face file", `<style>@font-face{font-family:x;src:url(https://cdn.other.com/x.woff2)}</style>`, Fail},
+		{"cross-origin preloaded font", `<link rel="preload" as="font" href="https://cdn.other.com/x.woff2" crossorigin>`, Fail},
+		{"self-hosted fonts are fine", `<link rel="stylesheet" href="/style.css"><style>@font-face{src:url(/fonts/x.woff2)}</style>`, Pass},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if out := chkSelfHostFonts(context.Background(), &CheckCtx{Doc: docFinal(surf, tc.body)}); out.Status != tc.want {
+				t.Errorf("got %s (%s), want %s", out.Status, out.Err, tc.want)
+			}
+		})
+	}
+}
+
 func TestHardenedSurfacePassesHeaderFamily(t *testing.T) {
 	doc := newDoc(200, "", hardenedHeaders)
 	c := &CheckCtx{Doc: doc, Surface: manifest.Surface{URL: "https://me.test"}}
