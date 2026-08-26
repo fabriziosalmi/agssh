@@ -8,8 +8,23 @@ before:
     - go mod tidy
 
 builds:
-  - main: ./cmd/agssh
+  - id: agssh
+    main: ./cmd/agssh
     binary: agssh
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w
+      - -X main.version={{ .Version }}
+      - -X main.commit={{ .Commit }}
+      - -X main.date={{ .Date }}
+  # The MCP server ships alongside the runner in every archive, so
+  # `claude mcp add agssh -- agssh-mcp` works from any downloaded release.
+  - id: agssh-mcp
+    main: ./cmd/agssh-mcp
+    binary: agssh-mcp
     env:
       - CGO_ENABLED=0
     goos: [linux, darwin, windows]

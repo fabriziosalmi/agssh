@@ -6,8 +6,8 @@ with **`agssh`**, the deterministic, fail-closed runner that enforces it.
 
 ```text
 standard/   the standard itself: rendered PDF + the canonical generator
-cmd/        the agssh CLI
-internal/   runner internals (manifest, csp, rules, engine, report)
+cmd/        the agssh CLI and agssh-mcp (MCP server)
+internal/   runner internals (manifest, csp, rules, engine, report, mcpsrv)
 action.yml  GitHub Action wrapper      Dockerfile  runtime image (Chromium + cosign)
 .airgap.yml conformant-by-default starter manifest
 examples/   wiring the gate as a required check
@@ -64,6 +64,32 @@ Runs from a prebuilt image (`ghcr.io/fabriziosalmi/agssh`), so no per-run rebuil
 ```
 
 Outputs: `conformant` (`"true"`/`"false"`) and `report` (path to the JSON record).
+
+### As an MCP server
+
+`agssh-mcp` exposes the same engine over the [Model Context Protocol](https://modelcontextprotocol.io)
+on stdio, so an agent can scan a surface without the build/config/parse dance. It
+reuses the runner in-process — no shell-out, no temp files.
+
+```bash
+go install github.com/fabriziosalmi/agssh/cmd/agssh-mcp@latest
+claude mcp add agssh -- agssh-mcp        # or use the repo's .mcp.json
+```
+
+Three read-only tools:
+
+| Tool | Purpose |
+|---|---|
+| `agssh_scan` | Evaluate a **live URL**; the manifest is synthesized from the arguments (`url`, `profile`, `level`, `kind`, `allow_*`, …). Source-plane rules report `INCONCLUSIVE`. |
+| `agssh_scan_config` | Evaluate an existing `.airgap.yml` with full CLI parity — repo / dist / workflow rules against real paths. |
+| `agssh_list_rules` | List the rule registry, filterable by `family` and `profile`. No network. |
+
+Each scan returns a human summary **and** the full structured conformance record
+(verdict, weighted score, and severity-ranked fix queue) for programmatic use.
+
+`agssh_scan` fetches the caller-supplied URL server-side, so it refuses
+loopback/private/link-local targets by default (an SSRF guard enforced at dial
+time on the resolved IP); pass `allow_private_targets` to scan a local surface.
 
 ### Waiver governance (the draconian heart)
 
