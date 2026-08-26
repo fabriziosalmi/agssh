@@ -45,6 +45,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   it also covers redirects and DNS-rebinding; the caller-supplied DNS `resolver`
   is guarded the same way. `agssh_scan_config` keeps CLI trust (operator-authored
   manifest).
+- **Wildcard allow-lists are rejected.** A `"*"` in `allow.connect` /
+  `allow.subresources` / `allow.embeds` / `allow.storage` would make the
+  allow-list disable the very check it scopes (a false PASS at L1+). It is now
+  refused at manifest load and by the MCP tools — the standard already requires
+  explicit origins, "never '*'".
 
 ### Fixed
 

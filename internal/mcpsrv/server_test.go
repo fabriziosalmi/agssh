@@ -204,6 +204,26 @@ func TestScanBlocksInternalResolver(t *testing.T) {
 	}
 }
 
+func TestScanRejectsWildcardAllow(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer ts.Close()
+	cs, ctx := connect(t)
+	// An untrusted caller must not be able to disable connect-src scoping with "*".
+	res, err := cs.CallTool(ctx, &mcp.CallToolParams{
+		Name: "agssh_scan",
+		Arguments: map[string]any{
+			"url": ts.URL, "allow_private_targets": true,
+			"level": "L1", "allow_connect": []string{"*"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("transport error: %v", err)
+	}
+	if !res.IsError {
+		t.Errorf("expected a wildcard allow_connect to be rejected")
+	}
+}
+
 func TestScanRejectsBadScheme(t *testing.T) {
 	cs, ctx := connect(t)
 	res, err := cs.CallTool(ctx, &mcp.CallToolParams{

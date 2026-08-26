@@ -174,7 +174,34 @@ func Load(path string) (*Config, error) {
 			return nil, fmt.Errorf("%s: surface[%d] has no url", path, i)
 		}
 	}
+	if err := ValidateAllow(c.Allow); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
 	return &c, nil
+}
+
+// ValidateAllow rejects wildcard entries in the egress/storage allow-lists.
+// AGSSH-STD-001 requires L1+ scoping to name EXPLICIT origins/hosts (connect-src
+// "never '*'"): a "*" (or any entry containing one) would make the allow-list
+// disable the very check it is meant to scope — a false PASS. It is enforced
+// here so both the CLI and the MCP server refuse such input, fail-closed.
+func ValidateAllow(a Allow) error {
+	for _, grp := range []struct {
+		name string
+		list []string
+	}{
+		{"connect", a.Connect},
+		{"subresources", a.Subresources},
+		{"embeds", a.Embeds},
+		{"storage", a.Storage},
+	} {
+		for _, e := range grp.list {
+			if strings.Contains(e, "*") {
+				return fmt.Errorf("allow.%s entry %q must be an explicit value, never a wildcard", grp.name, e)
+			}
+		}
+	}
+	return nil
 }
 
 func (c *Config) Profile() (Profile, error) { return ParseProfile(c.TargetProfile) }

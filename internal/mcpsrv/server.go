@@ -157,7 +157,10 @@ func handleScan(ctx context.Context, _ *mcp.CallToolRequest, in ScanInput) (res 
 	// to nothing (INCONCLUSIVE, fail-closed) and none of them silently scans the
 	// server's working directory. Empty strings are NOT safe here:
 	// filepath.Join("", name) collapses to a CWD-relative read.
-	noSrc, cleanup := absentSourceRoot()
+	noSrc, cleanup, e := absentSourceRoot()
+	if e != nil {
+		return nil, ScanResult{}, fmt.Errorf("cannot allocate a scratch root: %w", e)
+	}
 	defer cleanup()
 	opts := engine.Options{
 		RepoDir: noSrc, DistDir: noSrc, WorkflowsDir: noSrc,
@@ -431,7 +434,9 @@ func validateConfig(cfg *manifest.Config) error {
 			return fmt.Errorf("surface[%d] has no url", i)
 		}
 	}
-	return nil
+	// Reject wildcard allow-lists: an untrusted caller must not be able to pass
+	// allow_connect=["*"] (etc.) and disable the very check it scopes.
+	return manifest.ValidateAllow(cfg.Allow)
 }
 
 // normalizeURL requires an absolute http(s) URL with a host. A bare host such as
@@ -481,12 +486,14 @@ func registrableDomain(surfURL string) string {
 // exist, used as the repo/dist/workflow root for URL-only scans. The parent is a
 // fresh empty temp dir removed by cleanup; the returned child is never created,
 // so os.Stat fails and filepath.Join stays anchored to an absolute, non-CWD path.
-func absentSourceRoot() (path string, cleanup func()) {
+// If a scratch dir cannot be created it fails closed (returns an error) rather
+// than falling back to a fixed path that might exist and be scanned as a repo.
+func absentSourceRoot() (path string, cleanup func(), err error) {
 	parent, err := os.MkdirTemp("", "agssh-mcp-norepo-")
 	if err != nil {
-		return filepath.Join(os.TempDir(), "agssh-mcp-nonexistent-source"), func() {}
+		return "", func() {}, err
 	}
-	return filepath.Join(parent, "no-source"), func() { _ = os.RemoveAll(parent) }
+	return filepath.Join(parent, "no-source"), func() { _ = os.RemoveAll(parent) }, nil
 }
 
 func timeout(secs int) time.Duration {
