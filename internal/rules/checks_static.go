@@ -101,8 +101,10 @@ var embedTags = map[string]bool{"iframe": true, "embed": true, "object": true}
 
 var (
 	analyticsRe = regexp.MustCompile(`googletagmanager|google-analytics|gtag\s*\(|\b_gaq\b|\bG-[A-Z0-9]{10}\b|\bUA-[0-9]{4,}-[0-9]{1,4}\b`)
-	fontHostRe  = regexp.MustCompile(`(?i)fonts\.(googleapis|gstatic)\.com`)
-	maxAgeRe    = regexp.MustCompile(`(?i)max-age\s*=\s*(\d+)`)
+	// fontFaceURLRe matches a CSS url() that points at a font FILE — a real
+	// @font-face source, never prose (prose does not write url(…/x.woff2)).
+	fontFaceURLRe = regexp.MustCompile(`(?i)url\(\s*['"]?(https?://[^)'"\s]+\.(?:woff2?|ttf|otf|eot))`)
+	maxAgeRe      = regexp.MustCompile(`(?i)max-age\s*=\s*(\d+)`)
 )
 
 // subresourceRefs walks the HTML and returns the (tag, url) pairs of every
@@ -685,14 +687,53 @@ func chkZeroTelemetry(_ context.Context, c *CheckCtx) Outcome {
 	return okay("no analytics markers", "")
 }
 
+// chkSelfHostFonts (AG-PRV-03) flags fonts loaded from a third party. It is
+// HTML-aware: it inspects the actual font-loading constructs — a stylesheet /
+// preconnect to a known font CDN, a cross-origin `<link rel=preload as=font>`,
+// and `@font-face` src URLs pointing at a cross-origin font file — rather than
+// substring-matching the body (which false-positived on any page whose prose
+// merely mentions a font host, e.g. the AGSSH standard document itself).
 func chkSelfHostFonts(_ context.Context, c *CheckCtx) Outcome {
 	if c.Doc == nil {
 		return inconclusive("surface not fetched")
 	}
-	if m := fontHostRe.FindString(string(c.Doc.Body)); m != "" {
-		return bad("third-party font host: "+m, "self-hosted fonts only")
+	surfaceHost := httpx.HostOf(c.Doc.FinalURL)
+	for _, e := range collectEls(c.Doc.Body, "link") {
+		href := e.attr["href"]
+		if href == "" {
+			continue
+		}
+		host := httpx.HostOf(href)
+		rel := e.attr["rel"]
+		switch {
+		case relHas(rel, "stylesheet") && isFontProvider(host):
+			return bad("third-party font stylesheet: "+href, "self-hosted fonts only")
+		case (relHas(rel, "preconnect") || relHas(rel, "dns-prefetch")) && isFontProvider(host):
+			return bad("preconnect to third-party font host: "+host, "self-hosted fonts only")
+		case relHas(rel, "preload") && strings.EqualFold(e.attr["as"], "font") && host != "" && host != surfaceHost:
+			return bad("preloaded cross-origin font: "+href, "self-hosted fonts only")
+		}
+	}
+	for _, m := range fontFaceURLRe.FindAllStringSubmatch(string(c.Doc.Body), -1) {
+		if host := httpx.HostOf(m[1]); host != "" && host != surfaceHost {
+			return bad("@font-face from third party: "+m[1], "self-hosted fonts only")
+		}
 	}
 	return okay("fonts self-hosted", "")
+}
+
+// isFontProvider reports whether host is a well-known third-party font CDN.
+func isFontProvider(host string) bool {
+	host = strings.ToLower(host)
+	for _, p := range []string{
+		"fonts.googleapis.com", "fonts.gstatic.com", "fonts.bunny.net",
+		"use.typekit.net", "use.fontawesome.com", "fast.fonts.net", "cloud.typography.com",
+	} {
+		if host == p || strings.HasSuffix(host, "."+p) {
+			return true
+		}
+	}
+	return false
 }
 
 func chkCookieAttrs(_ context.Context, c *CheckCtx) Outcome {
