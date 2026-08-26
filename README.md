@@ -50,7 +50,22 @@ go build -o agssh ./cmd/agssh
         -approvers approvers.txt -author "$GIT_AUTHOR"
 ```
 
-Flags: `-config -repo -dist -workflows -out -profile -level -sign -artifact -author -approvers -timeout`.
+Flags: `-config -repo -dist -workflows -out -profile -level -sign -artifact -author -approvers -timeout -badge`.
+
+### Conformance badge
+
+`-badge out.svg` emits a **self-hosted** SVG badge — no web font, no external
+image, no third-party endpoint — so a project can serve it from its own origin
+without breaking its own AG-NET-02. The badge is a deterministic, pure function
+of the conformance record:
+
+- **conformant** → the earned tier as its metal (`AGSSH · Gold`), a fail-closed
+  claim that reproduces from the same record;
+- **non-conformant** → the grey *target* tier plus the weighted score
+  (`AGSSH · Gold · 41%`) — the gap, shown for what it is.
+
+The score is a development diagnostic (an `INCONCLUSIVE` is environment-sensitive
+and fail-closed); the **medal is the claim**.
 
 ### As a GitHub Action
 
