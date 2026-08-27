@@ -6,6 +6,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **The Meta Pixel is detected again, by path.** `connect.facebook.net` is
+  excluded from the analytics-host catalog because it also serves the Facebook JS
+  SDK (Login, Like/Share, embeds) — a legitimate non-tracking load. AG-PRV-01 now
+  matches the tracker at the path level (`connect.facebook.net/…/fbevents.js`) so
+  the Meta Pixel is flagged while the SDK stays clean, via a small `(host, path)`
+  signal list distinct from the bare-host catalog. Applies to the static plane,
+  where the full reference URL is available; the dynamic plane still matches hosts.
+
 ## [1.4.0] — 2026-08-27
 
 ### Changed

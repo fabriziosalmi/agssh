@@ -701,21 +701,37 @@ func chkZeroTelemetry(_ context.Context, c *CheckCtx) Outcome {
 		if !isExternal(surf, r.URL) {
 			continue
 		}
-		if t, hit := isAnalyticsHost(refHost(r.URL)); hit {
-			return bad("analytics host referenced: "+t+" (via <"+r.Tag+">)", "no analytics/telemetry at L0/L1")
+		if t, hit := isAnalyticsRef(refHostPath(r.URL)); hit {
+			return bad("analytics reference: "+t+" (via <"+r.Tag+">)", "no analytics/telemetry at L0/L1")
 		}
 	}
-	return okay("no third-party analytics host referenced", "")
+	return okay("no third-party analytics reference", "")
 }
 
-// refHost extracts the host from a resource reference, normalizing a
-// protocol-relative "//host/…" ref (which httpx.HostOf alone would drop).
-func refHost(ref string) string {
+// refHostPath splits a resource reference into its host and URL path, normalizing
+// a protocol-relative "//host/…" ref (which httpx.HostOf alone would drop). The
+// path lets the caller distinguish a tracking loader from a functional one on a
+// shared host (fbevents.js vs sdk.js on connect.facebook.net).
+func refHostPath(ref string) (host, path string) {
 	ref = strings.TrimSpace(ref)
 	if strings.HasPrefix(ref, "//") {
 		ref = "https:" + ref
 	}
-	return httpx.HostOf(ref)
+	host = httpx.HostOf(ref)
+	rest := ref
+	if i := strings.Index(rest, "://"); i >= 0 {
+		rest = rest[i+3:]
+	}
+	if i := strings.Index(rest, "@"); i >= 0 {
+		rest = rest[i+1:]
+	}
+	if i := strings.Index(rest, "/"); i >= 0 {
+		path = rest[i:]
+		if j := strings.IndexAny(path, "?#"); j >= 0 {
+			path = path[:j]
+		}
+	}
+	return host, path
 }
 
 // chkSelfHostFonts (AG-PRV-03) flags fonts loaded from a third party. It is

@@ -98,3 +98,30 @@ var analyticsHosts = []string{
 func isAnalyticsHost(host string) (string, bool) {
 	return hostSuffixIn(strings.ToLower(strings.TrimSpace(host)), analyticsHosts)
 }
+
+// analyticsPathSignals catches trackers whose HOST is deliberately absent from
+// analyticsHosts because it also serves a legitimate non-tracking resource, but
+// whose tracking loader lives at a distinctive PATH. Matching (host, path) instead
+// of the bare host keeps the functional sibling clean: connect.facebook.net serves
+// both fbevents.js (the Meta Pixel) and sdk.js (FB Login/embeds), so we flag only
+// the former. Path matching needs the full reference URL, so it is applied where
+// that is available (the static plane); the dynamic plane sees hosts only.
+var analyticsPathSignals = []struct{ host, pathContains, label string }{
+	{"connect.facebook.net", "fbevents.js", "connect.facebook.net/fbevents.js (Meta Pixel)"},
+}
+
+// isAnalyticsRef reports whether a resource reference (host + URL path) is a known
+// tracker — either a catalog host, or a functional-dual-use host on its tracking
+// path. Returns the matched label.
+func isAnalyticsRef(host, path string) (string, bool) {
+	if t, ok := isAnalyticsHost(host); ok {
+		return t, true
+	}
+	h, lp := strings.ToLower(strings.TrimSpace(host)), strings.ToLower(path)
+	for _, s := range analyticsPathSignals {
+		if (h == s.host || strings.HasSuffix(h, "."+s.host)) && strings.Contains(lp, s.pathContains) {
+			return s.label, true
+		}
+	}
+	return "", false
+}
