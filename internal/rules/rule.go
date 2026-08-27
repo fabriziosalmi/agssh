@@ -8,6 +8,8 @@ import (
 	"context"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/fabriziosalmi/agssh/internal/httpx"
@@ -185,7 +187,45 @@ func chromePath(look func(...string) string) string {
 			}
 		}
 	}
-	return look("google-chrome", "google-chrome-stable", "chromium", "chromium-browser", "headless-shell")
+	if p := look("google-chrome", "google-chrome-stable", "chromium", "chromium-browser", "headless-shell"); p != "" {
+		return p
+	}
+	// PATH misses on macOS and Windows, where the browser lives in an app bundle
+	// or Program Files and is never symlinked onto PATH. Probe known locations.
+	for _, p := range browserBundleCandidates() {
+		if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
+			return p
+		}
+	}
+	return ""
+}
+
+// browserBundleCandidates lists absolute browser locations for OSes that don't
+// expose the browser on PATH.
+func browserBundleCandidates() []string {
+	home, _ := os.UserHomeDir()
+	switch runtime.GOOS {
+	case "darwin":
+		return []string{
+			"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+			"/Applications/Chromium.app/Contents/MacOS/Chromium",
+			"/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+			filepath.Join(home, "Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
+		}
+	case "windows":
+		var out []string
+		for _, base := range []string{os.Getenv("ProgramFiles"), os.Getenv("ProgramFiles(x86)"), os.Getenv("LOCALAPPDATA")} {
+			if base == "" {
+				continue
+			}
+			out = append(out,
+				filepath.Join(base, `Google\Chrome\Application\chrome.exe`),
+				filepath.Join(base, `Microsoft\Edge\Application\msedge.exe`),
+			)
+		}
+		return out
+	}
+	return nil
 }
 
 // CheckCtx is the evidence surface a checker may read.
