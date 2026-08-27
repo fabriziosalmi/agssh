@@ -1,4 +1,4 @@
-# .airgap.yml — AGSSH-STD-001 v1.5.0 conformance declaration (one per repo).
+# .airgap.yml — AGSSH-STD-001 v1.5.1 conformance declaration (one per repo).
 # Ships green-by-default: a Bronze, stateless static surface is the path of
 # least resistance. Raise target_profile as the surface's value grows.
 
