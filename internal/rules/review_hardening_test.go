@@ -403,6 +403,27 @@ func TestChkSelfHostAllFlagsUnsetDirectives(t *testing.T) {
 	}
 }
 
+// RUN-10: AG-NET-01's fix-queue line must not read as "do what you already do".
+// The evidence must say the CSP *permits* third-party origins (a policy grant),
+// which is distinct from what the page actually loads (AG-NET-02). The verb is
+// the fix: a compliant operator whose page self-hosts everything can still carry
+// CSP slack, and the line must make clear that slack — not asset relocation — is
+// what to fix.
+func TestChkSelfHostAllEvidenceSaysPermits(t *testing.T) {
+	out := chkSelfHostAll(t.Context(), cspDoc("default-src 'none'; script-src https://cdn.example"))
+	if out.Status != Fail {
+		t.Fatalf("third-party script-src must FAIL, got %s", out.Status)
+	}
+	if !strings.Contains(out.Evidence.Observed, "permits") {
+		t.Errorf("evidence must say the CSP *permits* the origin (not that assets load), got %q", out.Evidence.Observed)
+	}
+	// The no-CSP branch must explain the wildcard-default reachability, not bare "no CSP".
+	no := chkSelfHostAll(t.Context(), &CheckCtx{Doc: newDoc(200, "", nil)})
+	if no.Status != Fail || !strings.Contains(no.Evidence.Observed, "wildcard") {
+		t.Errorf("no-CSP evidence must name the wildcard fallback, got %s %q", no.Status, no.Evidence.Observed)
+	}
+}
+
 func TestChkConnectSrcLevelGated(t *testing.T) {
 	c := cspDoc("default-src 'none'; connect-src https://api.example")
 	c.Allow = manifest.Allow{Connect: []string{"https://api.example"}}

@@ -164,13 +164,20 @@ func subresourceRefs(body []byte) []struct{ Tag, URL string } {
 // A directive that is neither explicitly set nor covered by default-src is a
 // leak too — the browser's initial value for most fetch-directives is wide
 // open (*), so "unset" is not "safe". connect-src is scoped by AG-NET-04.
+//
+// This is the static half of AG-NET-01 (egress ⊆ {self}): it measures the set
+// the CSP *permits* the page to reach, not the set it actually loads. The
+// evidence says "permits" for exactly that reason — a compliant operator whose
+// page self-hosts everything (AG-NET-02 PASS) can still carry CSP slack that
+// grants unused third-party origins, and that slack is what this rule flags.
 func chkSelfHostAll(_ context.Context, c *CheckCtx) Outcome {
 	if c.Doc == nil {
 		return inconclusive("surface not fetched")
 	}
 	pol, _ := docPolicy(c.Doc)
 	if !pol.Present {
-		return bad("no CSP", "a CSP locking all fetch-directives to 'self'/'none'")
+		return bad("no CSP; fetch-directives fall back to the browser's wildcard-open defaults",
+			"a CSP locking every fetch-directive to 'self'/'none'")
 	}
 	var leaks []string
 	for _, d := range csp.FetchDirectives {
@@ -179,7 +186,7 @@ func chkSelfHostAll(_ context.Context, c *CheckCtx) Outcome {
 		}
 		vals, ok := pol.Effective(d)
 		if !ok {
-			leaks = append(leaks, d+" (unset, no default-src)")
+			leaks = append(leaks, d+" (unset → wildcard default)")
 			continue
 		}
 		if !csp.SelfOnly(vals) {
@@ -187,9 +194,10 @@ func chkSelfHostAll(_ context.Context, c *CheckCtx) Outcome {
 		}
 	}
 	if len(leaks) > 0 {
-		return bad("third-party origins in: "+strings.Join(leaks, ", "), "all fetch-directives 'self'/'none'")
+		return bad("CSP permits third-party origins in: "+strings.Join(leaks, ", "),
+			"every fetch-directive locked to 'self'/'none' (the reachable egress set, not only what loads)")
 	}
-	return okay("no third-party fetch-directive", "")
+	return okay("CSP permits no third-party fetch-directive origin", "")
 }
 
 // hostAllowed reports whether host is in the allow-list (case-insensitive
