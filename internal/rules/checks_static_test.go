@@ -184,6 +184,8 @@ func TestChkSelfHostFonts(t *testing.T) {
 		{"prose mentions the font host", `<pre>zero fonts.googleapis.com / fonts.gstatic.com references</pre>` +
 			`<div>Self-host WOFF2 files in @font-face with font-src 'self'.</div>`, Pass},
 		{"third-party font stylesheet", `<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter">`, Fail},
+		{"protocol-relative font stylesheet", `<link rel="stylesheet" href="//fonts.googleapis.com/css2?family=Inter">`, Fail},
+		{"protocol-relative @font-face file", `<style>@font-face{src:url(//cdn.other.com/x.woff2)}</style>`, Fail},
 		{"preconnect to a font CDN", `<link rel="preconnect" href="https://fonts.gstatic.com">`, Fail},
 		{"cross-origin @font-face file", `<style>@font-face{font-family:x;src:url(https://cdn.other.com/x.woff2)}</style>`, Fail},
 		{"cross-origin preloaded font", `<link rel="preload" as="font" href="https://cdn.other.com/x.woff2" crossorigin>`, Fail},

@@ -6,6 +6,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **AG-PRV-03 now catches protocol-relative font sources.** The 1.3.1 rewrite
+  matched only `https?://`, so a scheme-relative third-party font
+  (`<link href="//fonts.gstatic.com…">` or `@font-face { src: url(//cdn/x.woff2) }`)
+  slipped through — `httpx.HostOf` reports an empty host for `//host`. The checker
+  now normalizes `//` refs before extracting the host, with regression cases.
+  (Found by Copilot review of #26.)
+
 ## [1.3.1] — 2026-08-27
 
 ### Fixed

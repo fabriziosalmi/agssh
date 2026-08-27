@@ -102,8 +102,9 @@ var embedTags = map[string]bool{"iframe": true, "embed": true, "object": true}
 var (
 	analyticsRe = regexp.MustCompile(`googletagmanager|google-analytics|gtag\s*\(|\b_gaq\b|\bG-[A-Z0-9]{10}\b|\bUA-[0-9]{4,}-[0-9]{1,4}\b`)
 	// fontFaceURLRe matches a CSS url() that points at a font FILE — a real
-	// @font-face source, never prose (prose does not write url(…/x.woff2)).
-	fontFaceURLRe = regexp.MustCompile(`(?i)url\(\s*['"]?(https?://[^)'"\s]+\.(?:woff2?|ttf|otf|eot))`)
+	// @font-face source, never prose (prose does not write url(…/x.woff2)). The
+	// scheme is optional so protocol-relative sources (url(//cdn/x.woff2)) match.
+	fontFaceURLRe = regexp.MustCompile(`(?i)url\(\s*['"]?((?:https?:)?//[^)'"\s]+\.(?:woff2?|ttf|otf|eot))`)
 	maxAgeRe      = regexp.MustCompile(`(?i)max-age\s*=\s*(\d+)`)
 )
 
@@ -698,12 +699,20 @@ func chkSelfHostFonts(_ context.Context, c *CheckCtx) Outcome {
 		return inconclusive("surface not fetched")
 	}
 	surfaceHost := httpx.HostOf(c.Doc.FinalURL)
+	// hostOf tolerates protocol-relative refs (//host/…), which HostOf alone
+	// reports as an empty host — otherwise a scheme-relative font CDN slips past.
+	hostOf := func(u string) string {
+		if strings.HasPrefix(strings.TrimSpace(u), "//") {
+			u = "https:" + strings.TrimSpace(u)
+		}
+		return httpx.HostOf(u)
+	}
 	for _, e := range collectEls(c.Doc.Body, "link") {
 		href := e.attr["href"]
 		if href == "" {
 			continue
 		}
-		host := httpx.HostOf(href)
+		host := hostOf(href)
 		rel := e.attr["rel"]
 		switch {
 		case relHas(rel, "stylesheet") && isFontProvider(host):
@@ -715,7 +724,7 @@ func chkSelfHostFonts(_ context.Context, c *CheckCtx) Outcome {
 		}
 	}
 	for _, m := range fontFaceURLRe.FindAllStringSubmatch(string(c.Doc.Body), -1) {
-		if host := httpx.HostOf(m[1]); host != "" && host != surfaceHost {
+		if host := hostOf(m[1]); host != "" && host != surfaceHost {
 			return bad("@font-face from third party: "+m[1], "self-hosted fonts only")
 		}
 	}
