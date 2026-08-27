@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.5.0] — 2026-08-27
+
 ### Changed
 
 - **AG-NET-05 renamed to match what it verifies: "No third-party egress during
