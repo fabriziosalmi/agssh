@@ -21,6 +21,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **Scanner evidence no longer leaks the tool's `--help` chatter.** When
+  `osv-scanner` (or `gitleaks`) failed to run — e.g. osv-scanner 2.x printing
+  `No package sources found, --help for usage information.` — the runner embedded
+  that usage pointer, banners, and ANSI control codes verbatim as the rule's
+  INCONCLUSIVE evidence, so a supply-chain result read as if the surface itself
+  said "see --help". A shared `toolDiag` sanitizer now strips ANSI/control
+  characters and the usage tail and keeps only the real diagnostic line.
+  (dogfooding finding RUN-05)
 - **Chrome is now discovered on macOS and Windows.** `chromePath` only searched
   `PATH` for Linux binary names, so on a stock macOS/Windows host — where the
   browser lives in an app bundle / Program Files and is never on `PATH` — the

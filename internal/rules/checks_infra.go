@@ -11,11 +11,16 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/miekg/dns"
 )
+
+// ansiCSIRe matches ANSI CSI escape sequences (colour codes, cursor moves) that
+// scanners emit on a TTY; they are noise, not evidence.
+var ansiCSIRe = regexp.MustCompile("\x1b\\[[0-9;]*[a-zA-Z]")
 
 // effectiveResolver resolves the DNS server to query: the explicit override
 // (manifest dns.resolver / -resolver), else the host's own configured resolver
@@ -399,7 +404,7 @@ func chkNoSecrets(ctx context.Context, c *CheckCtx) Outcome {
 	if trimmed := bytes.TrimSpace(data); len(trimmed) > 0 {
 		var findings []json.RawMessage
 		if json.Unmarshal(trimmed, &findings) != nil {
-			return inconclusive("gitleaks report not parseable: " + lastLine(out))
+			return inconclusive("gitleaks report not parseable: " + toolDiag(out))
 		}
 		if len(findings) > 0 {
 			return bad(fmt.Sprintf("gitleaks flagged %d secret(s)", len(findings)), "no secrets in shipped output")
@@ -411,7 +416,7 @@ func chkNoSecrets(ctx context.Context, c *CheckCtx) Outcome {
 	if runErr == nil {
 		return okay("gitleaks: no secrets", "")
 	}
-	return inconclusive("gitleaks did not complete: " + lastLine(out))
+	return inconclusive("gitleaks did not complete: " + toolDiag(out))
 }
 
 // AG-SUP-05: no source maps in the shipped artifact.
@@ -455,7 +460,7 @@ func chkNoKnownVulns(ctx context.Context, c *CheckCtx) Outcome {
 	_ = cmd.Run() // verdict comes from the JSON, not the exit code
 	n, ids, ok := parseOSVResults(stdout.Bytes())
 	if !ok {
-		return inconclusive("osv-scanner produced no parseable JSON (scan error?): " + lastLine(stderr.Bytes()))
+		return inconclusive("osv-scanner produced no parseable JSON (scan error?): " + toolDiag(stderr.Bytes()))
 	}
 	if n == 0 {
 		return okay("osv-scanner: no known vulnerabilities", "")
@@ -548,14 +553,43 @@ func dirExists(p string) bool {
 	return err == nil && fi.IsDir()
 }
 
-func lastLine(b []byte) string {
+// toolDiag turns a scanner's raw output into ONE sanitized diagnostic line that
+// is safe to embed as rule evidence. A scanner that fails to run tends to print
+// its own usage/`--help` chatter (which is UX about the tool, not evidence about
+// the surface) plus banners and control characters; surfacing that verbatim made
+// an INCONCLUSIVE read like the surface itself said "see --help". toolDiag scans
+// bottom-up for the last line that carries an actual diagnostic, strips the
+// usage tail and control characters, and caps the length.
+func toolDiag(b []byte) string {
 	lines := strings.Split(strings.TrimRight(string(b), "\n"), "\n")
-	if len(lines) == 0 {
-		return ""
+	for i := len(lines) - 1; i >= 0; i-- {
+		if s := sanitizeDiagLine(lines[i]); s != "" {
+			return s
+		}
 	}
-	s := lines[len(lines)-1]
-	if len(s) > 200 {
-		s = s[:200]
+	return "(no diagnostic output)"
+}
+
+// sanitizeDiagLine returns the evidence-bearing part of one output line, or ""
+// if the line is a blank / a pure "run … --help for usage" pointer.
+func sanitizeDiagLine(line string) string {
+	line = ansiCSIRe.ReplaceAllString(line, "")
+	if i := strings.Index(strings.ToLower(line), "--help"); i >= 0 {
+		line = line[:i] // drop the "--help for usage" tail: UX, not evidence
 	}
-	return s
+	line = strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return ' '
+		}
+		return r
+	}, line)
+	line = strings.TrimRight(strings.Join(strings.Fields(line), " "), " ,;.-")
+	low := strings.ToLower(line)
+	if line == "" || low == "usage" || strings.HasPrefix(low, "run ") || strings.HasPrefix(low, "see ") {
+		return "" // carries no evidence once the usage pointer is removed
+	}
+	if len(line) > 160 {
+		line = line[:160] + "…"
+	}
+	return line
 }
