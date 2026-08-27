@@ -95,6 +95,9 @@ func inconclusive(reason string) Outcome {
 	return Outcome{Status: Inconclusive, Err: reason}
 }
 func na() Outcome { return Outcome{Status: NotApplicable} }
+func naReason(observed string) Outcome {
+	return Outcome{Status: NotApplicable, Evidence: Evidence{Observed: observed}}
+}
 
 // Result is a stamped Outcome ready for the report.
 type Result struct {
