@@ -307,19 +307,20 @@ func handleListRules(_ context.Context, _ *mcp.CallToolRequest, in ListRulesInpu
 // full result set. It mirrors the report.Record the CLI writes, minus the
 // signature envelope (a scan tool never signs).
 type ScanResult struct {
-	Standard   string           `json:"standard"`
-	Version    string           `json:"version"`
-	Surface    string           `json:"surface"`
-	Profile    string           `json:"profile"`
-	Level      string           `json:"level"`
-	Verdict    string           `json:"verdict"`
-	Conformant bool             `json:"conformant"`
-	Score      report.Score     `json:"score"`
-	Counts     Counts           `json:"counts"`
-	Violations []string         `json:"governance_violations,omitempty"`
-	FixQueue   []report.FixItem `json:"fix_queue,omitempty"`
-	Results    []rules.Result   `json:"results,omitempty"`
-	Surfaces   []SurfaceVerdict `json:"surfaces,omitempty"` // set only for multi-surface manifests
+	Standard   string                  `json:"standard"`
+	Version    string                  `json:"version"`
+	Surface    string                  `json:"surface"`
+	Profile    string                  `json:"profile"`
+	Level      string                  `json:"level"`
+	Verdict    string                  `json:"verdict"`
+	Conformant bool                    `json:"conformant"`
+	Score      report.Score            `json:"score"`
+	Counts     Counts                  `json:"counts"`
+	Violations []string                `json:"governance_violations,omitempty"`
+	FixQueue   []report.FixItem        `json:"fix_queue,omitempty"`
+	Unassessed []report.UnassessedItem `json:"unassessed,omitempty"`
+	Results    []rules.Result          `json:"results,omitempty"`
+	Surfaces   []SurfaceVerdict        `json:"surfaces,omitempty"` // set only for multi-surface manifests
 }
 
 type Counts struct {
@@ -347,7 +348,7 @@ func renderResult(rec *report.Record) (*mcp.CallToolResult, ScanResult, error) {
 		Profile: rec.Profile, Level: rec.Level, Conformant: rec.Conformant,
 		Verdict: verdictString(rec.Conformant), Score: rec.Score,
 		Counts: countStatuses(rec), Violations: rec.Violations, FixQueue: rec.FixQueue,
-		Results: rec.Results,
+		Unassessed: rec.Unassessed, Results: rec.Results,
 	}
 	var buf bytes.Buffer
 	rec.Render(&buf)
@@ -414,6 +415,9 @@ func scrubPath(rec *report.Record, secret string) {
 	for i := range rec.FixQueue {
 		rec.FixQueue[i].Observed = repl(rec.FixQueue[i].Observed)
 		rec.FixQueue[i].Expected = repl(rec.FixQueue[i].Expected)
+	}
+	for i := range rec.Unassessed {
+		rec.Unassessed[i].Reason = repl(rec.Unassessed[i].Reason)
 	}
 }
 

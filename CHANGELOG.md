@@ -21,6 +21,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **The fix queue no longer mixes "must fix" with "could not check".** Previously
+  `BuildFixQueue` included every non-PASS result — FAIL *and* INCONCLUSIVE —
+  severity-ranked together, so an unrun check (missing scanner, unfetched path,
+  undeclared DNS zone) appeared as a ranked, actionable fix a surface change
+  could never resolve. The output now splits into two: **Fix queue** (FAIL only,
+  severity-ranked — things the owner can change) and **Could not assess**
+  (INCONCLUSIVE, rule-ID-ordered with the reason, deliberately unranked, since
+  severity says nothing about a check that never ran). The JSON record and the
+  MCP `ScanResult` carry them as **distinct keys** (`fix_queue` / `unassessed`)
+  so a consumer can never flatten them back together. Fail-closed is unchanged —
+  an unassessed rule still blocks the gate. (dogfooding finding RUN-09)
 - **AG-NET-01's evidence no longer reads as "do what you already do".** The rule
   title ("Self-host every runtime dependency") describes the normative outcome,
   but the runner's checker measures the CSP's *permitted* fetch-directive set —
