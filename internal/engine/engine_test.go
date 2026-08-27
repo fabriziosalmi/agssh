@@ -234,6 +234,46 @@ func TestScore(t *testing.T) {
 	}
 }
 
+// TestBuildEnvironmentDegraded pins RUN-07: a missing tool that silently disabled
+// a plane (Chrome → dynamic) surfaces as degraded=true with the tool named, so a
+// consumer summarising by status can still tell a partial scan from a complete
+// one. A missing tool that no in-scope rule needed does not degrade.
+func TestBuildEnvironmentDegraded(t *testing.T) {
+	dynInc := rules.Stamp(
+		rules.Rule{ID: "AG-PRV-02", Plane: rules.PlaneDynamic, Severity: rules.Critical, Obligation: rules.Must, Profile: manifest.Bronze},
+		rules.IncOutcome("headless load failed"),
+	)
+	staticPass := rules.Stamp(
+		rules.Rule{ID: "AG-CSP-01", Plane: rules.PlaneStatic, Severity: rules.High, Profile: manifest.Bronze},
+		rules.PassOutcome("ok", ""),
+	)
+	has := func(ss []string, w string) bool {
+		for _, s := range ss {
+			if s == w {
+				return true
+			}
+		}
+		return false
+	}
+
+	// Chrome absent + a dynamic rule INCONCLUSIVE -> degraded, chrome named.
+	env := buildEnvironment(rules.Toolbox{}, []rules.Result{dynInc, staticPass})
+	if !env.Degraded || !has(env.MissingTools, "chrome") {
+		t.Fatalf("chrome absent + dynamic INCONCLUSIVE must be degraded; got %+v", env)
+	}
+	if env.Tools["chrome"] {
+		t.Error("tools[chrome] must be false when Chrome is not resolved")
+	}
+	// Chrome present -> not degraded, even with a dynamic INCONCLUSIVE from another cause.
+	if env2 := buildEnvironment(rules.Toolbox{Chrome: "/usr/bin/chrome"}, []rules.Result{dynInc, staticPass}); env2.Degraded {
+		t.Errorf("Chrome present must not be degraded; got %+v", env2)
+	}
+	// A missing tool no in-scope rule needed -> not degraded.
+	if env3 := buildEnvironment(rules.Toolbox{Chrome: "/usr/bin/chrome"}, []rules.Result{staticPass}); env3.Degraded {
+		t.Errorf("a missing tool no rule needed must not degrade; got %+v", env3)
+	}
+}
+
 func TestHermeticOutcome(t *testing.T) {
 	t.Setenv("CI", "")
 	t.Setenv("ACTIONS_ID_TOKEN_REQUEST_URL", "")

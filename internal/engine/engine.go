@@ -182,6 +182,7 @@ func Evaluate(cfg *manifest.Config, surface manifest.Surface, opts Options) *rep
 	rec.Score = score(rec.Results, active, byID)
 	rec.FixQueue = report.BuildFixQueue(rec.Results)     // FAIL only — actionable
 	rec.Unassessed = report.BuildUnassessed(rec.Results) // INCONCLUSIVE — could not verify
+	rec.Environment = buildEnvironment(tools, rec.Results)
 	return rec
 }
 
@@ -232,6 +233,54 @@ func unreachableReason(surfaceURL string, cause error) string {
 		return fmt.Sprintf("TLS handshake with %s failed: %s", host, msg)
 	default:
 		return fmt.Sprintf("could not reach %s: %s", host, msg)
+	}
+}
+
+// buildEnvironment reports which external tools the runner resolved and whether a
+// missing one silently disabled a plane — so a consumer can tell a complete scan
+// from a partial one. A tool is only counted as "degraded" when its plane
+// actually produced an INCONCLUSIVE result attributable to its absence, so an
+// environment missing a tool no in-scope rule needed is not flagged.
+func buildEnvironment(tools rules.Toolbox, results []rules.Result) *report.Environment {
+	present := map[string]bool{
+		"chrome":      tools.Chrome != "",
+		"gitleaks":    tools.Gitleaks != "",
+		"osv-scanner": tools.OSVScanner != "",
+		"cosign":      tools.Cosign != "",
+		"zizmor":      tools.Zizmor != "",
+	}
+	dynamicInc, gitleaksInc, osvInc := false, false, false
+	for _, r := range results {
+		if r.Status != "INCONCLUSIVE" {
+			continue
+		}
+		switch {
+		case r.Plane == "dynamic":
+			dynamicInc = true
+		case strings.Contains(r.Err, "gitleaks not found"):
+			gitleaksInc = true
+		case strings.Contains(r.Err, "osv-scanner not found"):
+			osvInc = true
+		}
+	}
+	var missing, reasons []string
+	if !present["chrome"] && dynamicInc {
+		missing = append(missing, "chrome")
+		reasons = append(reasons, "no headless browser — the dynamic plane did not run (pre-consent egress, offline proof, egress canary); set AGSSH_CHROME to a Chrome/Chromium binary")
+	}
+	if !present["gitleaks"] && gitleaksInc {
+		missing = append(missing, "gitleaks")
+		reasons = append(reasons, "gitleaks absent — the shipped-secrets scan did not run")
+	}
+	if !present["osv-scanner"] && osvInc {
+		missing = append(missing, "osv-scanner")
+		reasons = append(reasons, "osv-scanner absent — the known-vulnerability scan did not run")
+	}
+	return &report.Environment{
+		Degraded:     len(reasons) > 0,
+		Reason:       strings.Join(reasons, "; "),
+		Tools:        present,
+		MissingTools: missing,
 	}
 }
 
