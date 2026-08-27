@@ -6,6 +6,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Chrome is now discovered on macOS and Windows.** `chromePath` only searched
+  `PATH` for Linux binary names, so on a stock macOS/Windows host — where the
+  browser lives in an app bundle / Program Files and is never on `PATH` — the
+  headless plane silently did not run: the CRITICAL **AG-PRV-02** rule was skipped
+  and the score understated by ~8 points, with no indication in the output. The
+  resolver now probes the known absolute install locations per OS. (dogfooding
+  finding RUN-01)
+
 ## [1.3.2] — 2026-08-27
 
 ### Fixed
