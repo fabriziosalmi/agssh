@@ -21,6 +21,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **AG-NET-01's evidence no longer reads as "do what you already do".** The rule
+  title ("Self-host every runtime dependency") describes the normative outcome,
+  but the runner's checker measures the CSP's *permitted* fetch-directive set —
+  what the policy grants, not what the page loads. On a surface that self-hosts
+  everything (AG-NET-02 PASS) but carries CSP slack, the CRITICAL fix-queue line
+  read as if the operator had failed to self-host. The evidence now says the CSP
+  *permits* the third-party origins (the reachable egress set, distinct from
+  loaded assets), so the actionable slack is unambiguous. The normative rule
+  identity is unchanged. (dogfooding finding RUN-10)
 - **Scanner evidence no longer leaks the tool's `--help` chatter.** When
   `osv-scanner` (or `gitleaks`) failed to run — e.g. osv-scanner 2.x printing
   `No package sources found, --help for usage information.` — the runner embedded
