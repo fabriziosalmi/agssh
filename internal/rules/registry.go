@@ -14,7 +14,7 @@ func All() []Rule {
 		{"AG-NET-02", "Override library default CDN loaders", "AG-NET", Must, Critical, B, PlaneStatic, always, chkNoCDNLoaders},
 		{"AG-NET-03", "Same-origin workers; constrain worker-src", "AG-NET", Must, High, S, PlaneStatic, always, chkWorkerSrc},
 		{"AG-NET-04", "Constrain connect-src", "AG-NET", Must, Critical, B, PlaneStatic, always, chkConnectSrc},
-		{"AG-NET-05", "Prove offline operation", "AG-NET", Must, High, S, PlaneDynamic, always, chkOfflineProof},
+		{"AG-NET-05", "No third-party egress during load", "AG-NET", Must, High, S, PlaneDynamic, always, chkOfflineProof},
 		{"AG-NET-06", "No third-party connection priming", "AG-NET", Must, Medium, S, PlaneStatic, always, chkNoPriming},
 		{"AG-NET-07", "Service Worker hygiene", "AG-NET", Must, High, S, PlaneDynamic, ifServiceWorker, chkServiceWorker},
 		{"AG-NET-08", "Violation/error reporting stays same-origin", "AG-NET", Must, Medium, S, PlaneStatic, always, chkReportSameOrigin},

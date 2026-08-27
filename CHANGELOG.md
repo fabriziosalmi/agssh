@@ -6,6 +6,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **AG-NET-05 renamed to match what it verifies: "No third-party egress during
+  load"** (was "Prove offline operation"). The old title and its normative text
+  described cutting the network after first paint and running a functional smoke
+  test — but the runner only observes that no third-party host responds during a
+  normal headless load. The title, the normative dict (`build_pdf.py`), and the
+  PASS evidence now describe that observable measurement. Enforcement is unchanged
+  (the runner always checked exactly this); the standard text now tells the truth
+  about it. (title-vs-checker drift audit; author decision to align the standard)
+
 ### Fixed
 
 - **AG-DNS-01 now requires a CAA policy that actually restricts issuance

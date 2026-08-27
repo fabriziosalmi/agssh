@@ -127,7 +127,7 @@ func offlineProofVerdict(self string, responded []string) Outcome {
 	if len(third) > 0 {
 		return bad("third-party responses from: "+strings.Join(uniq(third), ", "), "no third-party network during load")
 	}
-	return okay("no third-party responses during load (a necessary condition for offline operation; the network was not cut)", "")
+	return okay("no third-party responses observed during load", "")
 }
 
 // AG-PRV-02: no tracker beacons fire before any consent interaction.
