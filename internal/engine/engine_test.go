@@ -229,6 +229,9 @@ func TestScore(t *testing.T) {
 	if s.Pct < 71.4 || s.Pct > 71.5 {
 		t.Errorf("pct = %.2f, want ~71.43", s.Pct)
 	}
+	if s.Scored != 3 { // 3 non-N/A rules in the denominator (the N/A is excluded)
+		t.Errorf("scored = %d, want 3 (N/A excluded from the level-relative scope)", s.Scored)
+	}
 }
 
 func TestHermeticOutcome(t *testing.T) {

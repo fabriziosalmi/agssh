@@ -68,7 +68,10 @@ of the conformance record:
   (`AGSSH · Gold · 41%`) — the gap, shown for what it is.
 
 The score is a development diagnostic (an `INCONCLUSIVE` is environment-sensitive
-and fail-closed); the **medal is the claim**.
+and fail-closed); the **medal is the claim**. The percentage is also
+**level-relative** — a ratio over the rules in scope at the declared level — so
+scores are **not comparable across levels** (a stricter level can score lower on
+the same surface, because it evaluates more rules). Compare medals, not numbers.
 
 ### As a GitHub Action
 

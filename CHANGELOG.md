@@ -19,6 +19,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   This only triggers when a fetch was actually attempted; offline/source-only
   evaluations are unaffected. (dogfooding finding RUN-08)
 
+### Changed
+
+- **The score is now labelled level-relative.** A level change moves rules in or
+  out of scope, changing the denominator, so a stricter level can score *lower*
+  on the same surface — and nothing in the output said so, while the badge invited
+  exactly that comparison. The record now carries `score.scored` (rules in the
+  denominator) and the summary prints "Score scope: N rules scored at <level> —
+  level-relative, not comparable across levels"; the README says compare medals,
+  not numbers. (This is the honesty half of dogfooding finding RUN-06; the
+  monotonic-scoring model — never penalising a surface for exceeding its level —
+  changes badge numbers and is deferred to a deliberate scoring-model change.)
+
 ### Fixed
 
 - **The supply family no longer scores an empty scan as clean.** `AG-SUP-04`
