@@ -20,7 +20,7 @@ conforms to that standard.
 
 ## The standard
 
-<!-- agssh:std-headline -->[`standard/AGSSH-STD-001-v1.5.0.pdf`](standard/AGSSH-STD-001-v1.5.0.pdf) — 57 rules across 9 families<!-- /agssh:std-headline -->,
+<!-- agssh:std-headline -->[`standard/AGSSH-STD-001-v1.5.1.pdf`](standard/AGSSH-STD-001-v1.5.1.pdf) — 57 rules across 9 families<!-- /agssh:std-headline -->,
 three cumulative profiles (Gold superset of Silver
 superset of Bronze), assurance tiers (header / meta / runtime / structural),
 containment-first verification, governed waivers, and external signed

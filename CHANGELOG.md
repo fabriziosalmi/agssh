@@ -6,6 +6,19 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.5.1] — 2026-08-27
+
+### Changed
+
+- **Headless dynamic checks now allow up to 45s per browser run** (was 30s),
+  matching the CLI's default per-check budget and giving a cold Chrome start under
+  load more headroom before a check flakes to `INCONCLUSIVE`. Normal runs finish
+  in a few seconds; only the ceiling moved.
+- **CI actions bumped to their Node24 releases** (checkout v7, setup-go v7,
+  goreleaser-action v7, docker buildx/login/build-push v4/v7), clearing the Node20
+  deprecation warnings; validated via a non-publishing test-tag run. Repo/Action
+  infrastructure only — no change to the runner's verdicts.
+
 ## [1.5.0] — 2026-08-27
 
 ### Changed
