@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.3.2] — 2026-08-27
+
 ### Fixed
 
 - **`pipeline.enforce_ci_rules` is now wired.** It was declared in the manifest
@@ -325,7 +327,8 @@ Found by dogfooding agssh at Gold against its own repo and rendered standard.
 - CI: build, `go vet`, `gofmt`, `go test -race`, spec↔runner skew enforcement, and
   a goreleaser release pipeline.
 
-[Unreleased]: https://github.com/fabriziosalmi/agssh/compare/v1.3.1...HEAD
+[Unreleased]: https://github.com/fabriziosalmi/agssh/compare/v1.3.2...HEAD
+[1.3.2]: https://github.com/fabriziosalmi/agssh/compare/v1.3.1...v1.3.2
 [1.3.1]: https://github.com/fabriziosalmi/agssh/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/fabriziosalmi/agssh/compare/v1.2.2...v1.3.0
 [1.2.2]: https://github.com/fabriziosalmi/agssh/compare/v1.2.1...v1.2.2
