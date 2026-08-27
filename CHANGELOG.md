@@ -6,6 +6,31 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Privacy detection now covers the real tracker landscape, and correctly (a
+  conformance-affecting change).** `AG-PRV-01` (static, zero telemetry) matched
+  only Google analytics signatures, and `AG-PRV-02` (dynamic, pre-consent egress)
+  matched a hand-list of eight hosts — so a surface using Plausible, Matomo,
+  PostHog, Cloudflare Web Analytics, Hotjar, or any of dozens of other vendors
+  reported a **false PASS** on two CRITICAL MUSTs. Both rules now share one
+  audited catalog of ~100 third-party analytics/tracking hosts
+  (`internal/rules/trackers.go`) and detect by **host**, not by scanning the HTML
+  body for code tokens. The token approach was removed outright: an adversarial
+  review found a realistic false positive for *every* inline signature — a page
+  that merely *explains* how to remove Google Analytics, a GDPR guide about
+  blocking the Meta pixel, even the string "G-quadruplex" all matched while
+  running zero analytics, which is exactly agssh's audience. The host catalog was
+  itself audited entry-by-entry: hosts that double as a legitimate non-tracking
+  load (the Facebook JS SDK on `connect.facebook.net`, support-chat widgets like
+  Intercom, feature-flag/config control planes, general asset CDNs) are
+  deliberately **excluded**, so a FAIL on these rules is always true —
+  soundness over completeness. **Impact:** a surface that legitimately embeds a
+  third-party analytics/tracker will now FAIL `AG-PRV-01`/`AG-PRV-02` where it
+  previously passed; self-host the counter or drop it. Verified across 18 live
+  surfaces: the one using a tracker flips to FAIL, every clean surface stays PASS.
+  (dogfooding findings RUN-02, RUN-03)
+
 ## [1.3.3] — 2026-08-27
 
 ### Added

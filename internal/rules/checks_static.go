@@ -100,7 +100,6 @@ func sameSite(surfaceURL, ref string) bool {
 var embedTags = map[string]bool{"iframe": true, "embed": true, "object": true}
 
 var (
-	analyticsRe = regexp.MustCompile(`googletagmanager|google-analytics|gtag\s*\(|\b_gaq\b|\bG-[A-Z0-9]{10}\b|\bUA-[0-9]{4,}-[0-9]{1,4}\b`)
 	// fontFaceURLRe matches a CSS url() that points at a font FILE — a real
 	// @font-face source, never prose (prose does not write url(…/x.woff2)). The
 	// scheme is optional so protocol-relative sources (url(//cdn/x.woff2)) match.
@@ -686,14 +685,37 @@ func chkCOIso(_ context.Context, c *CheckCtx) Outcome {
 
 // ---------- privacy ----------
 
+// AG-PRV-01 (static): the shipped HTML references no third-party analytics host.
+// Detection is host-based — an analytics vendor host appearing in a real
+// resource-loading attribute (<script src>, <link>, <img>, <iframe>, …) is an
+// actual load, not prose. A page that merely *mentions* an analytics tool in its
+// text (a privacy guide, a "how to remove GA" tutorial) is not flagged. See
+// analyticsHosts for why substring detection was abandoned. Runtime-injected
+// analytics that leave no static reference are the dynamic plane's job (AG-PRV-02).
 func chkZeroTelemetry(_ context.Context, c *CheckCtx) Outcome {
 	if c.Doc == nil {
 		return inconclusive("surface not fetched")
 	}
-	if m := analyticsRe.FindString(string(c.Doc.Body)); m != "" {
-		return bad("analytics marker present: "+m, "no analytics/telemetry at L0/L1")
+	surf := c.Doc.FinalURL
+	for _, r := range subresourceRefs(c.Doc.Body) {
+		if !isExternal(surf, r.URL) {
+			continue
+		}
+		if t, hit := isAnalyticsHost(refHost(r.URL)); hit {
+			return bad("analytics host referenced: "+t+" (via <"+r.Tag+">)", "no analytics/telemetry at L0/L1")
+		}
 	}
-	return okay("no analytics markers", "")
+	return okay("no third-party analytics host referenced", "")
+}
+
+// refHost extracts the host from a resource reference, normalizing a
+// protocol-relative "//host/…" ref (which httpx.HostOf alone would drop).
+func refHost(ref string) string {
+	ref = strings.TrimSpace(ref)
+	if strings.HasPrefix(ref, "//") {
+		ref = "https:" + ref
+	}
+	return httpx.HostOf(ref)
 }
 
 // chkSelfHostFonts (AG-PRV-03) flags fonts loaded from a third party. It is
