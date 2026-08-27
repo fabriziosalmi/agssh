@@ -369,9 +369,6 @@ func chkPinnedDeps(_ context.Context, c *CheckCtx) Outcome {
 
 // AG-SUP-04: no secrets in the shipped artifact (gitleaks over dist).
 func chkNoSecrets(ctx context.Context, c *CheckCtx) Outcome {
-	if c.Tools.Gitleaks == "" {
-		return inconclusive("gitleaks not found on PATH")
-	}
 	dir := c.DistDir
 	if !dirExists(dir) {
 		dir = c.RepoDir
@@ -381,6 +378,15 @@ func chkNoSecrets(ctx context.Context, c *CheckCtx) Outcome {
 		// shipped output is secret-free, so fail-closed to INCONCLUSIVE — never
 		// scan the process's working directory by accident.
 		return inconclusive("no dist/repo directory to scan for secrets")
+	}
+	if !hasScannableFiles(dir) {
+		// The directory exists but holds no shipped artifacts (empty, or only
+		// config/VCS metadata). An empty scan is not evidence of "no secrets" — it
+		// is evidence that nothing was examined. N/A, not a vacuous PASS.
+		return naReason("no shipped artifacts to scan for secrets (empty or config-only directory)")
+	}
+	if c.Tools.Gitleaks == "" {
+		return inconclusive("gitleaks not found on PATH")
 	}
 	// gitleaks exits 1 for BOTH "leaks found" and some fatal scan errors (an
 	// unreadable file, a malformed .gitleaks.toml), so the exit code alone cannot
@@ -425,6 +431,9 @@ func chkNoSourceMaps(_ context.Context, c *CheckCtx) Outcome {
 	if _, err := os.Stat(dir); err != nil {
 		return inconclusive("dist dir not found: " + dir)
 	}
+	if !hasScannableFiles(dir) {
+		return naReason("no shipped artifacts to scan for source maps (empty or config-only directory)")
+	}
 	var found []string
 	_ = filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
@@ -446,13 +455,18 @@ func chkNoSourceMaps(_ context.Context, c *CheckCtx) Outcome {
 // lockfiles), so we parse the JSON: a scan error -> INCONCLUSIVE (honest,
 // fail-closed), real advisories -> FAIL, clean -> PASS.
 func chkNoKnownVulns(ctx context.Context, c *CheckCtx) Outcome {
-	if c.Tools.OSVScanner == "" {
-		return inconclusive("osv-scanner not found on PATH")
-	}
 	if !dirExists(c.RepoDir) {
 		// No repository to scan (e.g. a URL-only scan). Refuse to let osv-scanner
 		// fall back to the process working directory ("" scans '.').
 		return inconclusive("no repository directory to scan for known vulnerabilities")
+	}
+	if !hasScannableFiles(c.RepoDir) {
+		// Directory present but no shipped artifacts — inapplicable, not a clean
+		// bill of health. Coherent with AG-SUP-04 on the same input (RUN-04).
+		return naReason("no shipped artifacts to scan for known vulnerabilities (empty or config-only directory)")
+	}
+	if c.Tools.OSVScanner == "" {
+		return inconclusive("osv-scanner not found on PATH")
 	}
 	cmd := exec.CommandContext(ctx, c.Tools.OSVScanner, "--format=json", "--recursive", c.RepoDir)
 	var stdout, stderr bytes.Buffer
@@ -551,6 +565,33 @@ func dirExists(p string) bool {
 	}
 	fi, err := os.Stat(p)
 	return err == nil && fi.IsDir()
+}
+
+// hasScannableFiles reports whether dir holds at least one regular file that
+// counts as shipped output: a non-hidden file outside a dot-directory. Config
+// and VCS metadata (.airgap.yml, .gitleaks.toml, .git/, .github/) are not shipped
+// artifacts, so a directory holding only those has nothing for the supply-plane
+// scanners to judge — scanning it and reporting "clean" would be a vacuous PASS.
+// The supply family treats such a directory as N/A rather than PASS.
+func hasScannableFiles(dir string) bool {
+	found := false
+	_ = filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			if p != dir && strings.HasPrefix(d.Name(), ".") {
+				return filepath.SkipDir // .git, .github, …
+			}
+			return nil
+		}
+		if strings.HasPrefix(d.Name(), ".") {
+			return nil // hidden file (.airgap.yml, .gitleaks.toml) — not shipped output
+		}
+		found = true
+		return filepath.SkipAll // one is enough
+	})
+	return found
 }
 
 // toolDiag turns a scanner's raw output into ONE sanitized diagnostic line that

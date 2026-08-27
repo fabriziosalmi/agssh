@@ -61,6 +61,10 @@ func TestChkNoSecretsReportSemantics(t *testing.T) {
 		t.Skip("fakeGitleaks relies on /bin/sh")
 	}
 	dir := t.TempDir() // a real, existing directory to get past the dir guard
+	// A shipped artifact so the scan has scannable input (past the RUN-04 N/A guard).
+	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("<html></html>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	cases := []struct {
 		name       string
 		reportJSON string
@@ -96,6 +100,43 @@ func TestChkNoKnownVulnsMissingRepo(t *testing.T) {
 	})
 	if out.Status != Inconclusive {
 		t.Errorf("missing repo: got %s, want INCONCLUSIVE", out.Status)
+	}
+}
+
+// TestSupplyEmptyDirIsNA pins RUN-04: a directory holding no shipped artifacts
+// (empty, or only config/VCS metadata) is N/A across the whole SUP family — never
+// a vacuous PASS, and coherently the same posture for every family member. A
+// directory with a real shipped file still runs the scanners.
+func TestSupplyEmptyDirIsNA(t *testing.T) {
+	empty := t.TempDir()
+	cfgOnly := t.TempDir()
+	if err := os.WriteFile(filepath.Join(cfgOnly, ".airgap.yml"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, dir := range []string{empty, cfgOnly} {
+		c := &CheckCtx{
+			Tools:   Toolbox{Gitleaks: "/nonexistent", OSVScanner: "/nonexistent"},
+			DistDir: dir, RepoDir: dir,
+		}
+		if out := chkNoSecrets(t.Context(), c); out.Status != NotApplicable {
+			t.Errorf("AG-SUP-04 on empty/config-only dir: got %s, want N/A", out.Status)
+		}
+		if out := chkNoSourceMaps(t.Context(), c); out.Status != NotApplicable {
+			t.Errorf("AG-SUP-05 on empty/config-only dir: got %s, want N/A", out.Status)
+		}
+		if out := chkNoKnownVulns(t.Context(), c); out.Status != NotApplicable {
+			t.Errorf("AG-SUP-06 on empty/config-only dir: got %s, want N/A", out.Status)
+		}
+	}
+
+	// A dir WITH a real shipped file must NOT be N/A — the scanners run.
+	real := t.TempDir()
+	if err := os.WriteFile(filepath.Join(real, "app.js"), []byte("console.log(1)"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out := chkNoSourceMaps(t.Context(), &CheckCtx{DistDir: real}); out.Status == NotApplicable {
+		t.Error("a dir with a real shipped file must not be N/A")
 	}
 }
 

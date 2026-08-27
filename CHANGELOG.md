@@ -21,6 +21,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **The supply family no longer scores an empty scan as clean.** `AG-SUP-04`
+  (secrets) and `AG-SUP-05` (source maps) returned PASS when handed a directory
+  with no shipped artifacts — empty, or holding only config/VCS metadata
+  (`.airgap.yml`, `.git/`) — while `AG-SUP-06` (vulns) returned INCONCLUSIVE on
+  the same input: two rules, one input, opposite postures, and the PASS earned
+  real points. A shared precondition now returns **N/A** ("no shipped artifacts
+  to scan") for the whole family when the target directory contains no scannable
+  (non-hidden) file, keeping the denominator honest and the family coherent. A
+  directory with real shipped files still runs every scanner; a genuinely absent
+  directory still fails closed to INCONCLUSIVE. (dogfooding finding RUN-04)
 - **The fix queue no longer mixes "must fix" with "could not check".** Previously
   `BuildFixQueue` included every non-PASS result — FAIL *and* INCONCLUSIVE —
   severity-ranked together, so an unrun check (missing scanner, unfetched path,
