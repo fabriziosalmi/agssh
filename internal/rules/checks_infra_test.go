@@ -157,3 +157,29 @@ func TestChkDangling(t *testing.T) {
 		t.Errorf("resolving-but-unclaimed takeover: got %s, want FAIL", out.Status)
 	}
 }
+
+// TestToolDiagSanitizesUsageChatter pins RUN-05: a scanner that fails to run
+// prints its own "--help for usage" UX and banners; toolDiag must surface the
+// real diagnostic, never the usage pointer or control characters.
+func TestToolDiagSanitizesUsageChatter(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		// The exact osv-scanner 2.x failure that leaked into evidence.
+		{"osv-no-sources", "scanning...\nNo package sources found, --help for usage information.", "No package sources found"},
+		// A pure usage pointer on the last line falls back to the real error above it.
+		{"usage-pointer-last", "Error: unknown flag --format\nRun 'osv-scanner --help' for usage.", "Error: unknown flag --format"},
+		// ANSI colour codes and CR are stripped, leaving the clean message.
+		{"control-chars", "line1\r\n\x1b[31mfatal: bad config\x1b[0m", "fatal: bad config"},
+		// Nothing but usage chatter yields a stable placeholder, not a dangling reason.
+		{"only-usage", "--help for usage information.", "(no diagnostic output)"},
+		{"empty", "", "(no diagnostic output)"},
+	}
+	for _, c := range cases {
+		if got := toolDiag([]byte(c.in)); got != c.want {
+			t.Errorf("%s: toolDiag = %q, want %q", c.name, got, c.want)
+		}
+	}
+}
