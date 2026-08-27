@@ -6,6 +6,22 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **Exceeding a level's demands no longer lowers the score (monotonic scoring;
+  changes badge numbers).** A rule scoped to stricter levels (today only
+  `AG-PRV-01`, required at L0/L1, excused at L2/marketing) used to be dropped
+  from the score at a laxer level — so a clean surface that *still* had zero
+  telemetry watched its percentage FALL when it correctly relaxed to L2, the
+  backwards incentive the RUN-06 honesty note flagged in v1.3.3. Level-scope is
+  now separated from surface applicability (`ruleLevels` / `LevelInScope`): a rule
+  out of scope only for the level is still evaluated and **kept as earned credit
+  when the surface passes it**, and excused (dropped, never penalised) when it
+  does not. Relaxing the level can therefore only add passing rules, never remove
+  them. Since the score feeds the badge, badge percentages for L1/L2 surfaces that
+  exceed their level may rise. Verified: a clean surface scores the same at L2 as
+  at L0 (was: lower at L2). (dogfooding finding RUN-06, scoring-model half)
+
 ### Fixed
 
 - **Privacy detection now covers the real tracker landscape, and correctly (a

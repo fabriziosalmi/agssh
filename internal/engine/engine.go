@@ -115,7 +115,18 @@ func Evaluate(cfg *manifest.Config, surface manifest.Surface, opts Options) *rep
 			out = check(ctx, cctx)
 		}
 		cancel()
-		results = append(results, rules.Stamp(r, out))
+		res := rules.Stamp(r, out)
+		if !rules.LevelInScope(r.ID, level) {
+			// Out of scope at this level: the level does not DEMAND this rule. Keep
+			// it only if the surface passes it anyway — exceeding a stricter rule
+			// than the level requires is earned credit, never a penalty. A non-pass
+			// here is excused (dropped), not counted, so relaxing the level can only
+			// ADD passing rules to the score, never remove them (RUN-06 monotonicity).
+			if res.Raw() != rules.Pass {
+				continue
+			}
+		}
+		results = append(results, res)
 	}
 
 	// 2) Governance (AG-GOV-01..04) + waiver set.
