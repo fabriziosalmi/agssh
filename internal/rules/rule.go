@@ -266,17 +266,6 @@ type Rule struct {
 
 func always(_ manifest.Surface, _ manifest.Level) bool { return true }
 
-func atLevels(ls ...manifest.Level) func(manifest.Surface, manifest.Level) bool {
-	return func(_ manifest.Surface, l manifest.Level) bool {
-		for _, x := range ls {
-			if x == l {
-				return true
-			}
-		}
-		return false
-	}
-}
-
 func ifFileGen(s manifest.Surface, _ manifest.Level) bool       { return s.GeneratesFiles }
 func ifThreadedWASM(s manifest.Surface, _ manifest.Level) bool  { return s.ThreadedWASM }
 func ifServiceWorker(s manifest.Surface, _ manifest.Level) bool { return s.HasServiceWorker }

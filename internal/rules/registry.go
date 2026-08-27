@@ -63,7 +63,7 @@ func All() []Rule {
 		{"AG-CI-06", "Automated contributors under the same gate", "AG-CI", Should, Medium, G, PlaneCI, always, todo("verify bot PRs run the required check")},
 
 		// ---- §8 AG-PRV — Privacy & Data Minimization ----
-		{"AG-PRV-01", "Zero telemetry by default", "AG-PRV", Must, Critical, B, PlaneStatic, atLevels(manifest.L0, manifest.L1), chkZeroTelemetry},
+		{"AG-PRV-01", "Zero telemetry by default", "AG-PRV", Must, Critical, B, PlaneStatic, always, chkZeroTelemetry},
 		{"AG-PRV-02", "No pre-consent egress", "AG-PRV", Must, Critical, B, PlaneDynamic, always, chkPreConsentEgress},
 		{"AG-PRV-03", "Self-host fonts", "AG-PRV", Must, High, B, PlaneStatic, always, chkSelfHostFonts},
 		{"AG-PRV-04", "Minimize client storage", "AG-PRV", Must, Medium, S, PlaneDynamic, always, chkClientStorage},
@@ -84,4 +84,33 @@ func All() []Rule {
 		{"AG-GOV-06", "Active egress canary", "AG-GOV", Must, High, S, PlaneDynamic, always, chkEgressCanary},
 		{"AG-GOV-07", "Build environment is ephemeral and hermetic", "AG-GOV", Must, High, G, PlaneEngine, always, nil},
 	}
+}
+
+// ruleLevels declares which LEVELS a rule is in scope for, kept SEPARATE from a
+// rule's surface applicability (Applies). A rule absent from the map is in scope
+// at every level. Level-scope is distinct from surface-scope because the engine
+// treats them differently: a rule out of scope for the SURFACE is excluded
+// outright, whereas a rule out of scope only for the LEVEL is still evaluated and
+// kept as earned credit if the surface passes it — so exceeding a stricter level's
+// demand never lowers the score (see engine scoring; dogfooding finding RUN-06).
+var ruleLevels = map[string][]manifest.Level{
+	// AG-PRV-01 (zero telemetry) is required at the air-gapped levels; L2 (marketing)
+	// tolerates telemetry, so at L2 a surface that still has zero telemetry earns the
+	// point, and one that does not is excused rather than penalised.
+	"AG-PRV-01": {manifest.L0, manifest.L1},
+}
+
+// LevelInScope reports whether rule id is required at level l. A rule with no
+// declared level-scope is in scope at every level.
+func LevelInScope(id string, l manifest.Level) bool {
+	levels, ok := ruleLevels[id]
+	if !ok {
+		return true
+	}
+	for _, x := range levels {
+		if x == l {
+			return true
+		}
+	}
+	return false
 }

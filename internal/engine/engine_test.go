@@ -425,3 +425,58 @@ func twoShoulds(t *testing.T, idx map[string]rules.Rule) (string, string) {
 	t.Fatal("need two SHOULD rules visible at Silver")
 	return "", ""
 }
+
+// TestLevelScopedBonusCredit pins RUN-06's monotonic-scoring model: AG-PRV-01 is
+// level-scoped to L0/L1. A surface that PASSES it still earns the credit at L2
+// (out of scope → bonus), while a surface that FAILS it is excused at L2 (dropped,
+// not penalized). So relaxing the level can only add passing rules, never remove
+// them — the score is monotonic across levels.
+func TestLevelScopedBonusCredit(t *testing.T) {
+	clean := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`<!doctype html><html><head><title>t</title></head><body>hi</body></html>`))
+	}))
+	defer clean.Close()
+	tracker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`<!doctype html><html><head><script src="https://plausible.io/js/script.js"></script></head><body>hi</body></html>`))
+	}))
+	defer tracker.Close()
+
+	prv01 := func(url, level string) (present bool, status string) {
+		surf := manifest.Surface{URL: url, Kind: "site", Stateless: true}
+		cfg := &manifest.Config{TargetProfile: "Bronze", Level: level, Surfaces: []manifest.Surface{surf}}
+		rec := Evaluate(cfg, surf, Options{HTTP: httpx.New(3 * time.Second), Now: time.Now(), PerCheck: 3 * time.Second})
+		for _, res := range rec.Results {
+			if res.RuleID == "AG-PRV-01" {
+				return true, res.Status
+			}
+		}
+		return false, ""
+	}
+
+	// Clean surface: PASS in scope (L0) AND kept as PASS out of scope (L2 bonus).
+	if p, s := prv01(clean.URL, "L0"); !p || s != "PASS" {
+		t.Errorf("clean@L0: AG-PRV-01 present=%v status=%s, want present PASS", p, s)
+	}
+	if p, s := prv01(clean.URL, "L2"); !p || s != "PASS" {
+		t.Errorf("clean@L2: AG-PRV-01 must be kept as a PASS (bonus credit); present=%v status=%s", p, s)
+	}
+	// Tracker surface: FAIL in scope (L0), but EXCUSED (absent) out of scope (L2).
+	if p, s := prv01(tracker.URL, "L0"); !p || s != "FAIL" {
+		t.Errorf("tracker@L0: AG-PRV-01 present=%v status=%s, want present FAIL", p, s)
+	}
+	if p, _ := prv01(tracker.URL, "L2"); p {
+		t.Errorf("tracker@L2: a failing out-of-level rule must be excused (dropped), not penalized")
+	}
+}
+
+func TestLevelInScope(t *testing.T) {
+	if !rules.LevelInScope("AG-PRV-01", manifest.L0) || !rules.LevelInScope("AG-PRV-01", manifest.L1) {
+		t.Error("AG-PRV-01 must be in scope at L0 and L1")
+	}
+	if rules.LevelInScope("AG-PRV-01", manifest.L2) {
+		t.Error("AG-PRV-01 must be OUT of scope at L2")
+	}
+	if !rules.LevelInScope("AG-NET-01", manifest.L2) {
+		t.Error("a rule with no declared level-scope must be in scope at every level")
+	}
+}
