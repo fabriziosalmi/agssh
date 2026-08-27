@@ -18,6 +18,7 @@ type Score struct {
 	Possible      int     `json:"possible"`
 	Pct           float64 `json:"pct"`
 	DeviationDebt int     `json:"deviation_debt"`
+	Scored        int     `json:"scored"` // rules in the denominator (non-N/A); the score is relative to THIS level's scope
 }
 
 type FixItem struct {
@@ -180,6 +181,12 @@ func (r *Record) Render(w io.Writer) {
 	}
 	fmt.Fprintf(w, "Rules: %d PASS · %d FAIL · %d INCONCLUSIVE · %d waived · %d N/A\n",
 		pass, fail, inc, waived, na)
+	// The score is a ratio over the rules IN SCOPE at this level. Relaxing the
+	// level moves rules out of scope, which changes the denominator — so scores
+	// are NOT comparable across levels (a stricter level can score lower on the
+	// same surface). Say so, next to the number that invites the comparison.
+	fmt.Fprintf(w, "Score scope: %d rules scored at %s — level-relative, not comparable across levels\n",
+		r.Score.Scored, r.Level)
 
 	if len(r.Violations) > 0 {
 		fmt.Fprintf(w, "\nGovernance violations:\n")

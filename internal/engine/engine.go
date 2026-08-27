@@ -251,11 +251,12 @@ func gate(results []rules.Result, violations []string) bool {
 
 // score is the weighted conformance score; deviation debt is reported beside it.
 func score(results []rules.Result, active map[string]bool, byID map[string]rules.Rule) report.Score {
-	earned, possible := 0, 0
+	earned, possible, scored := 0, 0, 0
 	for _, res := range results {
 		if res.Status == "N/A" {
 			continue
 		}
+		scored++
 		w := res.Sev().Weight()
 		possible += w
 		if res.Status == "PASS" {
@@ -272,7 +273,7 @@ func score(results []rules.Result, active map[string]bool, byID map[string]rules
 	if possible > 0 {
 		pct = 100 * float64(earned) / float64(possible)
 	}
-	return report.Score{Earned: earned, Possible: possible, Pct: pct, DeviationDebt: debt}
+	return report.Score{Earned: earned, Possible: possible, Pct: pct, DeviationDebt: debt, Scored: scored}
 }
 
 // fetchDocs retrieves the surface root plus any extra declared same-origin
