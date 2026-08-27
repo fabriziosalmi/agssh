@@ -2,8 +2,11 @@ package engine
 
 import (
 	"context"
+	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -19,14 +22,68 @@ func TestFetchDocsMultiPath(t *testing.T) {
 	defer srv.Close()
 	client := httpx.New(3 * time.Second)
 
-	docs := fetchDocs(client, srv.URL, []string{"/extra", "/extra"}, 3*time.Second)
+	docs, rootErr := fetchDocs(client, srv.URL, []string{"/extra", "/extra"}, 3*time.Second)
 	if len(docs) != 2 { // root + /extra (deduped)
 		t.Fatalf("got %d docs, want 2 (root + one deduped path)", len(docs))
 	}
-	// An unreachable extra path is dropped; the root still comes back.
-	docs = fetchDocs(client, srv.URL, []string{"http://127.0.0.1:1/down"}, 1*time.Second)
-	if len(docs) != 1 {
-		t.Fatalf("got %d docs, want 1 (unreachable path dropped)", len(docs))
+	if rootErr != nil {
+		t.Fatalf("reachable root must have no error, got %v", rootErr)
+	}
+	// An unreachable extra path is dropped; the root still comes back with no error.
+	docs, rootErr = fetchDocs(client, srv.URL, []string{"http://127.0.0.1:1/down"}, 1*time.Second)
+	if len(docs) != 1 || rootErr != nil {
+		t.Fatalf("got %d docs (err %v), want 1 with no root error (unreachable path dropped)", len(docs), rootErr)
+	}
+	// An unreachable ROOT yields zero docs and a non-nil transport error.
+	docs, rootErr = fetchDocs(client, "http://127.0.0.1:1/", nil, 1*time.Second)
+	if len(docs) != 0 || rootErr == nil {
+		t.Fatalf("unreachable root: got %d docs err=%v, want 0 docs and a non-nil error", len(docs), rootErr)
+	}
+}
+
+// TestEvaluateUnscannableSurface pins the reachability gate: when the surface
+// root cannot be fetched, Evaluate returns a distinct UNSCANNABLE record with no
+// verdict, score, fix queue, or results — the runner never observed the surface,
+// so it makes no claim about it.
+func TestEvaluateUnscannableSurface(t *testing.T) {
+	surf := manifest.Surface{URL: "http://127.0.0.1:1/", Kind: "site", Stateless: true}
+	cfg := &manifest.Config{TargetProfile: "Bronze", Level: "L0", Surfaces: []manifest.Surface{surf}}
+	rec := Evaluate(cfg, surf, Options{
+		HTTP: httpx.New(500 * time.Millisecond), Now: time.Now(), PerCheck: 500 * time.Millisecond,
+	})
+	if !rec.Unscannable {
+		t.Fatalf("an unreachable root must be UNSCANNABLE; got conformant=%v results=%d", rec.Conformant, len(rec.Results))
+	}
+	if rec.Conformant {
+		t.Error("an unscannable surface must never be conformant")
+	}
+	if rec.Score.Possible != 0 || len(rec.FixQueue) != 0 || len(rec.Results) != 0 {
+		t.Errorf("unscannable must emit no score/fixqueue/results; got score=%+v fixq=%d results=%d",
+			rec.Score, len(rec.FixQueue), len(rec.Results))
+	}
+	if rec.Unreachable == "" {
+		t.Error("unscannable must carry a human transport reason")
+	}
+}
+
+// TestUnreachableReasonClassifies pins the human wording per failure mode.
+func TestUnreachableReasonClassifies(t *testing.T) {
+	cases := []struct {
+		name  string
+		cause error
+		want  string // substring
+	}{
+		{"nxdomain", &net.DNSError{Err: "no such host", Name: "nope.invalid", IsNotFound: true}, "does not resolve"},
+		{"refused", errors.New("dial tcp 127.0.0.1:1: connect: connection refused"), "refused"},
+		{"timeout", context.DeadlineExceeded, "did not respond"},
+		{"tls", errors.New("x509: certificate signed by unknown authority"), "TLS handshake"},
+		{"nil", nil, "per-check timeout"},
+	}
+	for _, c := range cases {
+		got := unreachableReason("https://host.example/", c.cause)
+		if !strings.Contains(got, c.want) {
+			t.Errorf("%s: reason %q must contain %q", c.name, got, c.want)
+		}
 	}
 }
 

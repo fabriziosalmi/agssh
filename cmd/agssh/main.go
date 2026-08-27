@@ -1,7 +1,8 @@
 // Command agssh is the AGSSH-STD-001 conformance runner. It evaluates each
 // declared surface against its target profile by observing the LIVE deployment,
 // applies governed waivers, and emits a signed conformance record. Exit codes:
-// 0 = conformant, 1 = non-conformant, 2 = usage/internal error.
+// 0 = conformant, 1 = non-conformant, 2 = usage/internal error, 3 = a surface
+// was unscannable (its live deployment could not be fetched).
 package main
 
 import (
@@ -92,11 +93,15 @@ func main() {
 	}
 
 	allConformant := true
+	anyUnscannable := false
 	var records []*report.Record
 	for _, s := range cfg.Surfaces {
 		rec := engine.Evaluate(cfg, s, opts)
 		rec.Render(os.Stdout)
 		records = append(records, rec)
+		if rec.Unscannable {
+			anyUnscannable = true
+		}
 		if !rec.Conformant {
 			allConformant = false
 		}
@@ -107,10 +112,15 @@ func main() {
 	// target tier plus the score. Egress-free, so a project can serve it from its
 	// own origin without breaking its own AG-NET-02.
 	if *badgePath != "" {
-		if e := os.WriteFile(*badgePath, badge.RenderAggregate(records), 0o644); e != nil {
+		if anyUnscannable {
+			// No verdict was reached for at least one surface, so there is nothing
+			// to certify. Emitting a badge here would misrepresent an unseen surface.
+			fmt.Fprintf(os.Stderr, "badge skipped: a surface was unscannable (no verdict to certify)\n")
+		} else if e := os.WriteFile(*badgePath, badge.RenderAggregate(records), 0o644); e != nil {
 			fail(e)
+		} else {
+			fmt.Fprintf(os.Stderr, "badge written: %s\n", filepath.Clean(*badgePath))
 		}
-		fmt.Fprintf(os.Stderr, "badge written: %s\n", filepath.Clean(*badgePath))
 	}
 
 	if *out != "-" {
@@ -132,6 +142,11 @@ func main() {
 	}
 	emitGitHubOutputs(allConformant, reportPath)
 
+	// Exit-3 (unscannable) takes precedence over exit-1 (non-conformant): the two
+	// are different failures — "I could not look" vs "I looked and it fell short".
+	if anyUnscannable {
+		os.Exit(3)
+	}
 	if !allConformant {
 		os.Exit(1)
 	}

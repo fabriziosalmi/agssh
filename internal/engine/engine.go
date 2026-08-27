@@ -5,6 +5,9 @@ package engine
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"strings"
@@ -47,12 +50,24 @@ func Evaluate(cfg *manifest.Config, surface manifest.Surface, opts Options) *rep
 	// the root document by default; for multi-path surfaces they are evaluated
 	// worst-case across every sampled document (a weaker per-path header loses).
 	var docs []*httpx.Doc
+	var rootErr error
 	if opts.HTTP != nil {
-		docs = fetchDocs(opts.HTTP, surface.URL, surface.Paths, opts.PerCheck)
+		docs, rootErr = fetchDocs(opts.HTTP, surface.URL, surface.Paths, opts.PerCheck)
 	}
 	var rootDoc *httpx.Doc
 	if len(docs) > 0 {
 		rootDoc = docs[0]
+	}
+
+	// Reachability gate: a fetch was attempted but the surface root never came
+	// back. The runner observed nothing — emitting a verdict, score, or badge
+	// would be a claim about a surface it never saw. Return a distinct
+	// UNSCANNABLE record (fail-closed, but honestly labelled) instead of scoring
+	// a pile of "surface not fetched" INCONCLUSIVEs as if the surface were merely
+	// weak. Only triggers when HTTP was actually configured (nil HTTP = an
+	// offline/source-only evaluation, e.g. some unit tests, which is legitimate).
+	if opts.HTTP != nil && rootDoc == nil {
+		return unscannableRecord(surface, profile, level, opts.Now, rootErr)
 	}
 
 	resolver := opts.Resolver
@@ -169,6 +184,56 @@ func Evaluate(cfg *manifest.Config, surface manifest.Surface, opts Options) *rep
 	return rec
 }
 
+// unscannableRecord is the record for a surface whose root could not be fetched:
+// no results, no score, no fix queue — only the transport cause, in the runner's
+// own words. It is not conformant (nothing was proven) but it is distinct from a
+// non-conformant surface, and the CLI maps it to its own exit code.
+func unscannableRecord(surface manifest.Surface, profile manifest.Profile, level manifest.Level, now time.Time, cause error) *report.Record {
+	return &report.Record{
+		Standard:    "AGSSH-STD-001",
+		Version:     docVersion,
+		Generator:   "agssh-runner " + docVersion,
+		GeneratedAt: now.UTC().Format(time.RFC3339),
+		Surface:     surface.URL,
+		Profile:     profile.String(),
+		Level:       level.String(),
+		Conformant:  false,
+		Unscannable: true,
+		Unreachable: unreachableReason(surface.URL, cause),
+	}
+}
+
+// unreachableReason turns the raw transport error into one human sentence,
+// distinguishing the failure modes an operator acts on differently: a name that
+// does not resolve, a refused connection, a timeout, or a TLS failure.
+func unreachableReason(surfaceURL string, cause error) string {
+	host := surfaceURL
+	if u, err := url.Parse(surfaceURL); err == nil && u.Host != "" {
+		host = u.Host
+	}
+	if cause == nil {
+		return fmt.Sprintf("could not fetch %s within the per-check timeout", host)
+	}
+	var dnsErr *net.DNSError
+	if errors.As(cause, &dnsErr) {
+		if dnsErr.IsNotFound {
+			return fmt.Sprintf("%s does not resolve (no DNS record)", host)
+		}
+		return fmt.Sprintf("DNS lookup for %s failed: %s", host, dnsErr.Err)
+	}
+	msg := cause.Error()
+	switch {
+	case strings.Contains(msg, "connection refused"):
+		return fmt.Sprintf("connection to %s refused (nothing is listening)", host)
+	case errors.Is(cause, context.DeadlineExceeded) || strings.Contains(msg, "timeout") || strings.Contains(msg, "deadline exceeded"):
+		return fmt.Sprintf("%s did not respond before the per-check timeout", host)
+	case strings.Contains(msg, "x509") || strings.Contains(msg, "certificate") || strings.Contains(msg, "tls:"):
+		return fmt.Sprintf("TLS handshake with %s failed: %s", host, msg)
+	default:
+		return fmt.Sprintf("could not reach %s: %s", host, msg)
+	}
+}
+
 // gate blocks on ANY failing MUST, any unwaived failing SHOULD, or any
 // governance violation. Inconclusive counts as failing (fail-closed).
 func gate(results []rules.Result, violations []string) bool {
@@ -210,9 +275,11 @@ func score(results []rules.Result, active map[string]bool, byID map[string]rules
 }
 
 // fetchDocs retrieves the surface root plus any extra declared same-origin
-// paths, each with bounded retries. The root is always first; unreachable URLs
-// are dropped (a static check over zero docs stays INCONCLUSIVE via cctx.Doc==nil).
-func fetchDocs(client *httpx.Client, surfaceURL string, paths []string, perCheck time.Duration) []*httpx.Doc {
+// paths, each with bounded retries. The root is always first. Extra paths that
+// fail are dropped; if the ROOT itself cannot be fetched, its transport error is
+// returned so the caller can emit a distinct UNSCANNABLE record rather than
+// silently scoring the surface it never saw.
+func fetchDocs(client *httpx.Client, surfaceURL string, paths []string, perCheck time.Duration) ([]*httpx.Doc, error) {
 	targets := []string{surfaceURL}
 	if base, err := url.Parse(surfaceURL); err == nil {
 		seen := map[string]bool{surfaceURL: true}
@@ -236,12 +303,18 @@ func fetchDocs(client *httpx.Client, surfaceURL string, paths []string, perCheck
 		}
 	}
 	var docs []*httpx.Doc
-	for _, t := range targets {
-		if d := fetchWithRetry(client, t, perCheck, 3); d != nil {
+	var rootErr error
+	for i, t := range targets {
+		d, err := fetchWithRetry(client, t, perCheck, 3)
+		if d != nil {
 			docs = append(docs, d)
+			continue
+		}
+		if i == 0 { // the root surface itself could not be fetched
+			rootErr = err
 		}
 	}
-	return docs
+	return docs, rootErr
 }
 
 // sameOrigin reports whether raw has the same scheme+host(+port) as base.
@@ -256,8 +329,9 @@ func sameOrigin(base *url.URL, raw string) bool {
 // fetchWithRetry retries a transient fetch failure so a single network blip
 // doesn't turn the whole gate red — but all attempts share ONE perCheck budget,
 // so a black-holed host can't multiply latency to attempts×perCheck.
-func fetchWithRetry(client *httpx.Client, target string, perCheck time.Duration, attempts int) *httpx.Doc {
+func fetchWithRetry(client *httpx.Client, target string, perCheck time.Duration, attempts int) (*httpx.Doc, error) {
 	deadline := time.Now().Add(perCheck)
+	var lastErr error
 	for i := 0; i < attempts; i++ {
 		remaining := time.Until(deadline)
 		if remaining <= 0 {
@@ -267,10 +341,14 @@ func fetchWithRetry(client *httpx.Client, target string, perCheck time.Duration,
 		d, err := client.Fetch(ctx, target)
 		cancel()
 		if err == nil {
-			return d
+			return d, nil
 		}
+		lastErr = err
 	}
-	return nil
+	if lastErr == nil { // ran out of budget before the first attempt completed
+		lastErr = context.DeadlineExceeded
+	}
+	return nil, lastErr
 }
 
 // worstAcrossDocs runs a static checker against every sampled document and keeps

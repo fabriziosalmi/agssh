@@ -6,6 +6,19 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Reachability gate: an unreachable surface is now `UNSCANNABLE`, not a low
+  score.** Previously, when the live surface could not be fetched at all (NXDOMAIN,
+  connection refused, TLS failure, timeout) the runner still produced a full
+  record — every static/dynamic rule `INCONCLUSIVE`, a non-zero *possible* score,
+  a fix queue, and (with `-badge`) a badge — as if it had inspected a merely weak
+  surface. It now short-circuits to a distinct `UNSCANNABLE` record carrying the
+  transport cause in one sentence, emits **no** verdict / score / fix queue /
+  badge, and exits with the new code **`3`** (distinct from `1` non-conformant).
+  This only triggers when a fetch was actually attempted; offline/source-only
+  evaluations are unaffected. (dogfooding finding RUN-08)
+
 ### Fixed
 
 - **Chrome is now discovered on macOS and Windows.** `chromePath` only searched
