@@ -295,6 +295,8 @@ func TestChkZeroTelemetryHostBased(t *testing.T) {
 		{"mixpanel", `<script src="https://cdn.mxpnl.com/libs/mixpanel-2-latest.min.js"></script>`},
 		{"hotjar via preload link", `<link rel="preload" as="script" href="https://static.hotjar.com/c/hotjar-123.js">`},
 		{"posthog", `<script src="https://us.i.posthog.com/static/array.js"></script>`},
+		// Path-level: the Meta Pixel loader is flagged though its host is excluded.
+		{"facebook pixel (fbevents.js path)", `<script src="https://connect.facebook.net/en_US/fbevents.js"></script>`},
 	}
 	for _, c := range mustFail {
 		if out := chkZeroTelemetry(context.Background(), ctx(c.body)); out.Status != Fail {
