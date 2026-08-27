@@ -278,3 +278,45 @@ func TestSameSite(t *testing.T) {
 		}
 	}
 }
+
+// TestChkZeroTelemetryHostBased pins RUN-02: AG-PRV-01 flags a third-party
+// analytics host only when the HTML actually REFERENCES it in a resource-loading
+// attribute — never on prose/code that merely mentions analytics. The prose case
+// is the exact false positive the old substring regex produced on agssh's own
+// audience (privacy tools and docs about removing trackers).
+func TestChkZeroTelemetryHostBased(t *testing.T) {
+	ctx := func(body string) *CheckCtx {
+		return &CheckCtx{Doc: &httpx.Doc{FinalURL: "https://me.test/", Body: []byte(body)}}
+	}
+	mustFail := []struct{ name, body string }{
+		{"plausible", `<script src="https://plausible.io/js/script.js"></script>`},
+		{"GA4 loader", `<script src="https://www.googletagmanager.com/gtag/js?id=G-ABCDEFGHIJ"></script>`},
+		{"cloudflare insights (protocol-relative)", `<script src="//static.cloudflareinsights.com/beacon.min.js"></script>`},
+		{"mixpanel", `<script src="https://cdn.mxpnl.com/libs/mixpanel-2-latest.min.js"></script>`},
+		{"hotjar via preload link", `<link rel="preload" as="script" href="https://static.hotjar.com/c/hotjar-123.js">`},
+		{"posthog", `<script src="https://us.i.posthog.com/static/array.js"></script>`},
+	}
+	for _, c := range mustFail {
+		if out := chkZeroTelemetry(context.Background(), ctx(c.body)); out.Status != Fail {
+			t.Errorf("%s: got %s, want FAIL", c.name, out.Status)
+		}
+	}
+	mustPass := []struct{ name, body string }{
+		// THE false-positive guard: analytics named in prose/code, none loaded.
+		{"prose about removing GA", `<article><h1>We removed Google Analytics</h1>` +
+			`<p>The old <code>gtag()</code> snippet used a <code>UA-12345-1</code> property; ` +
+			`we deleted analytics.js. Unrelated: G-quadruplex DNA folds under stress.</p></article>`},
+		{"clean first-party page", `<script src="/app.js"></script><link rel="stylesheet" href="/style.css">`},
+		{"legit non-analytics CDN", `<script src="https://cdn.jsdelivr.net/npm/thing/dist.js"></script>`},
+		{"first-party subdomain asset", `<script src="https://cdn.me.test/app.js"></script>`},
+		// Deliberately excluded from the catalog (shared with a functional load):
+		// the FB JS SDK / Login on connect.facebook.net must NOT false-FAIL.
+		{"facebook SDK (functional, excluded)", `<script src="https://connect.facebook.net/en_US/sdk.js"></script>`},
+		{"intercom support widget (excluded)", `<script src="https://widget.intercom.io/widget/abc"></script>`},
+	}
+	for _, c := range mustPass {
+		if out := chkZeroTelemetry(context.Background(), ctx(c.body)); out.Status != Pass {
+			t.Errorf("%s: got %s (%s), want PASS", c.name, out.Status, out.Evidence.Observed)
+		}
+	}
+}

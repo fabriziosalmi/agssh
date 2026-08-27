@@ -24,12 +24,6 @@ const canaryJS = `(function(){
   return 1;
 })()`
 
-var trackerHosts = []string{
-	"googletagmanager.com", "google-analytics.com", "analytics.google.com",
-	"stats.g.doubleclick.net", "connect.facebook.net", "px.ads.linkedin.com",
-	"cdn.segment.com", "static.hotjar.com",
-}
-
 type netObs struct {
 	mu        sync.Mutex
 	requested map[string]bool
@@ -148,10 +142,14 @@ func chkPreConsentEgress(ctx context.Context, c *CheckCtx) Outcome {
 	return preConsentVerdict(obs.requestedHosts())
 }
 
-// preConsentVerdict fails if any requested host is a known tracker.
+// preConsentVerdict fails if the first-visit (no-consent) load contacted any
+// known third-party analytics/tracker host. The catalog (analyticsHosts) is
+// shared with AG-PRV-01; expanding it from the original 8-host list is the RUN-03
+// fix — a request is an actual egress, so host-matching here carries no
+// false-positive risk (unlike static substring scans of the HTML body).
 func preConsentVerdict(requested []string) Outcome {
 	for _, h := range requested {
-		if t, hit := hostSuffixIn(h, trackerHosts); hit {
+		if t, hit := isAnalyticsHost(h); hit {
 			return bad("tracker contacted pre-consent: "+t, "no analytics/tracker egress before consent")
 		}
 	}

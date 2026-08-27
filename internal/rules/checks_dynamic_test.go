@@ -102,3 +102,27 @@ func TestClientStorageIntegration(t *testing.T) {
 		t.Errorf("allow-listed localStorage key: got %s (%s), want PASS", allowed.Status, allowed.Err)
 	}
 }
+
+// TestPreConsentVerdictExpandedCatalog pins RUN-03: AG-PRV-02 now flags the wider
+// analytics/tracker catalog, not just the original 8 hosts — cloudflareinsights
+// (the audiolibri.org repro), plausible, posthog, etc. A first-party or neutral
+// host still passes.
+func TestPreConsentVerdictExpandedCatalog(t *testing.T) {
+	fail := []string{
+		"static.cloudflareinsights.com", "plausible.io", "us.i.posthog.com",
+		"cdn.mxpnl.com", "static.hotjar.com", "www.clarity.ms", "mc.yandex.ru",
+	}
+	for _, h := range fail {
+		if out := preConsentVerdict([]string{"me.test", h}); out.Status != Fail {
+			t.Errorf("pre-consent egress to %s: got %s, want FAIL", h, out.Status)
+		}
+	}
+	pass := [][]string{
+		{"me.test"}, {"cdn.me.test", "fonts-but-first-party.me.test"}, {},
+	}
+	for _, hs := range pass {
+		if out := preConsentVerdict(hs); out.Status != Pass {
+			t.Errorf("%v: got %s, want PASS", hs, out.Status)
+		}
+	}
+}
