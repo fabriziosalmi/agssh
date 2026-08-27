@@ -8,6 +8,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **`pipeline.enforce_ci_rules` is now wired.** It was declared in the manifest
+  and documented ("apply the AG-CI family to .github/workflows") but the engine
+  ignored it — the AG-CI family always ran. A web surface would then be marked
+  down for its own repo's workflow hygiene. The engine now excludes the AG-CI
+  plane when `enforce_ci_rules: false`. (Found by dogfooding the runner against
+  live sites whose `.airgap.yml` set it false.)
 - **AG-PRV-03 now catches protocol-relative font sources.** The 1.3.1 rewrite
   matched only `https?://`, so a scheme-relative third-party font
   (`<link href="//fonts.gstatic.com…">` or `@font-face { src: url(//cdn/x.woff2) }`)

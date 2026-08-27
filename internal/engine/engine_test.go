@@ -73,6 +73,30 @@ func res(ob rules.Obligation, sev rules.Severity, st rules.Status, waived bool) 
 // passes the gate iff it is not (Failing AND not waived). Failing == Fail or
 // Inconclusive. This is the core promise — nothing is green unless proven — as a
 // closed-form truth table, so there is no doubt about the verdict logic.
+func TestEnforceCIRulesGate(t *testing.T) {
+	surf := manifest.Surface{URL: "https://example.test/", Kind: "site", Stateless: true}
+	hasCI := func(enforce bool) bool {
+		cfg := &manifest.Config{
+			TargetProfile: "Silver", Level: "L2",
+			Surfaces: []manifest.Surface{surf},
+			Pipeline: manifest.Pipeline{EnforceCIRules: enforce},
+		}
+		rec := Evaluate(cfg, surf, Options{Now: time.Now(), PerCheck: time.Second})
+		for _, r := range rec.Results {
+			if r.Family == "AG-CI" {
+				return true
+			}
+		}
+		return false
+	}
+	if hasCI(false) {
+		t.Errorf("enforce_ci_rules=false must exclude the AG-CI family")
+	}
+	if !hasCI(true) {
+		t.Errorf("enforce_ci_rules=true must evaluate the AG-CI family")
+	}
+}
+
 func TestGateTruthTable(t *testing.T) {
 	statuses := []rules.Status{rules.Pass, rules.Fail, rules.Inconclusive, rules.NotApplicable}
 	for _, st := range statuses {

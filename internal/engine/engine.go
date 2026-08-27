@@ -84,6 +84,9 @@ func Evaluate(cfg *manifest.Config, surface manifest.Surface, opts Options) *rep
 		if r.Plane == rules.PlaneEngine {
 			continue // governance rules handled below
 		}
+		if r.Plane == rules.PlaneCI && !cfg.Pipeline.EnforceCIRules {
+			continue // AG-CI family gated off by pipeline.enforce_ci_rules=false
+		}
 		check := r.Check
 		if check == nil {
 			results = append(results, rules.Stamp(r, rules.IncOutcome("no checker bound")))
