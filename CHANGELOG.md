@@ -8,6 +8,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Every result now discloses a degraded environment.** A missing tool could
+  silently disable a whole plane — most importantly, no headless Chrome meant the
+  dynamic plane (pre-consent egress, offline proof, egress canary) did not run —
+  yet the verdict, score and fix queue came back looking exactly as confident as a
+  complete scan; the only trace was one rule's error string, which any status-only
+  summary drops (measured: 39.5% via MCP vs 53.5% fully armed, same surface). The
+  record and the MCP `ScanResult` now carry an `environment` block (resolved tools
+  as booleans — never paths — `degraded`, a one-line reason, and the missing
+  tools); the CLI/MCP summary prints a prominent "⚠ Partial scan (degraded
+  environment): …" line; and the `agssh_scan` tool description documents the
+  Chrome requirement and `AGSSH_CHROME`. A tool no in-scope rule needed does not
+  flag degraded. (dogfooding finding RUN-07)
 - **Reachability gate: an unreachable surface is now `UNSCANNABLE`, not a low
   score.** Previously, when the live surface could not be fetched at all (NXDOMAIN,
   connection refused, TLS failure, timeout) the runner still produced a full

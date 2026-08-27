@@ -89,3 +89,30 @@ func TestRenderSectionsAreDistinct(t *testing.T) {
 		t.Error("fix queue must render before the could-not-assess section")
 	}
 }
+
+// TestRenderDegradedEnvironment pins RUN-07: a degraded environment surfaces as a
+// prominent header line, not buried in one rule's error.
+func TestRenderDegradedEnvironment(t *testing.T) {
+	rec := &Record{
+		Version: "vX", Surface: "https://x.test/", Profile: "Bronze", Level: "L0",
+		Environment: &Environment{
+			Degraded: true, Reason: "no headless browser — the dynamic plane did not run; set AGSSH_CHROME",
+			Tools: map[string]bool{"chrome": false}, MissingTools: []string{"chrome"},
+		},
+	}
+	var b strings.Builder
+	rec.Render(&b)
+	out := b.String()
+	if !strings.Contains(out, "Partial scan (degraded environment)") || !strings.Contains(out, "AGSSH_CHROME") {
+		t.Errorf("degraded env must render a prominent header with the fix; got:\n%s", out)
+	}
+
+	// A fully-armed environment renders no degraded header.
+	ok := &Record{Version: "vX", Surface: "s", Profile: "Bronze", Level: "L0",
+		Environment: &Environment{Degraded: false, Tools: map[string]bool{"chrome": true}}}
+	var b2 strings.Builder
+	ok.Render(&b2)
+	if strings.Contains(b2.String(), "Partial scan") {
+		t.Error("a non-degraded environment must not render the partial-scan header")
+	}
+}

@@ -58,6 +58,19 @@ type Signature struct {
 	Value  string `json:"value"`
 }
 
+// Environment records which external tools the runner resolved, so a consumer
+// (a human, or an LLM summarising the MCP JSON) can tell a complete scan from a
+// partial one. A confident-looking verdict produced with the dynamic plane off
+// is the trap this closes: Degraded is the one flag a status-only summary keeps.
+// Tool presence is reported as a boolean, never a resolved path, so the MCP
+// result cannot disclose the server's filesystem layout.
+type Environment struct {
+	Degraded     bool            `json:"degraded"`
+	Reason       string          `json:"reason,omitempty"`
+	Tools        map[string]bool `json:"tools"`
+	MissingTools []string        `json:"missing_tools,omitempty"`
+}
+
 type Record struct {
 	Standard       string           `json:"standard"`
 	Version        string           `json:"version"`
@@ -75,6 +88,7 @@ type Record struct {
 	Violations     []string         `json:"governance_violations,omitempty"`
 	FixQueue       []FixItem        `json:"fix_queue,omitempty"`
 	Unassessed     []UnassessedItem `json:"unassessed,omitempty"`
+	Environment    *Environment     `json:"environment,omitempty"`
 	ArtifactDigest string           `json:"artifact_digest,omitempty"`
 	Signature      *Signature       `json:"signature"`
 }
@@ -187,6 +201,12 @@ func (r *Record) Render(w io.Writer) {
 	// same surface). Say so, next to the number that invites the comparison.
 	fmt.Fprintf(w, "Score scope: %d rules scored at %s — level-relative, not comparable across levels\n",
 		r.Score.Scored, r.Level)
+	// A missing tool can silently disable a whole plane; a confident verdict
+	// produced with the dynamic plane off is exactly the trap to flag. Say it
+	// loudly, next to the score, not buried in one rule's error field.
+	if r.Environment != nil && r.Environment.Degraded {
+		fmt.Fprintf(w, "⚠ Partial scan (degraded environment): %s\n", r.Environment.Reason)
+	}
 
 	if len(r.Violations) > 0 {
 		fmt.Fprintf(w, "\nGovernance violations:\n")

@@ -45,8 +45,12 @@ func New(version string) *mcp.Server {
 			"verdict, weighted score, and a severity-ranked fix queue. The manifest is " +
 			"synthesized from the arguments — no repository or config file is required. " +
 			"Repo/supply-chain/CI rules that need source access report INCONCLUSIVE (fail-closed). " +
-			"The server performs a server-side fetch of the URL, so by default it refuses " +
-			"loopback/private/link-local targets (SSRF guard); set allow_private_targets to " +
+			"The dynamic plane (pre-consent egress, offline proof, egress canary) needs a headless " +
+			"Chrome/Chromium; without one those rules are INCONCLUSIVE and the result's `environment` " +
+			"block reports degraded=true — point AGSSH_CHROME at a browser binary to arm it. Always " +
+			"check `environment.degraded` before trusting the score: a partial scan looks as confident " +
+			"as a complete one. The server performs a server-side fetch of the URL, so by default it " +
+			"refuses loopback/private/link-local targets (SSRF guard); set allow_private_targets to " +
 			"scan a local dev server. Defaults: profile=Bronze, level=L0 (strict air-gap), kind=site.",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptr(true)},
 	}, handleScan)
@@ -307,20 +311,21 @@ func handleListRules(_ context.Context, _ *mcp.CallToolRequest, in ListRulesInpu
 // full result set. It mirrors the report.Record the CLI writes, minus the
 // signature envelope (a scan tool never signs).
 type ScanResult struct {
-	Standard   string                  `json:"standard"`
-	Version    string                  `json:"version"`
-	Surface    string                  `json:"surface"`
-	Profile    string                  `json:"profile"`
-	Level      string                  `json:"level"`
-	Verdict    string                  `json:"verdict"`
-	Conformant bool                    `json:"conformant"`
-	Score      report.Score            `json:"score"`
-	Counts     Counts                  `json:"counts"`
-	Violations []string                `json:"governance_violations,omitempty"`
-	FixQueue   []report.FixItem        `json:"fix_queue,omitempty"`
-	Unassessed []report.UnassessedItem `json:"unassessed,omitempty"`
-	Results    []rules.Result          `json:"results,omitempty"`
-	Surfaces   []SurfaceVerdict        `json:"surfaces,omitempty"` // set only for multi-surface manifests
+	Standard    string                  `json:"standard"`
+	Version     string                  `json:"version"`
+	Surface     string                  `json:"surface"`
+	Profile     string                  `json:"profile"`
+	Level       string                  `json:"level"`
+	Verdict     string                  `json:"verdict"`
+	Conformant  bool                    `json:"conformant"`
+	Score       report.Score            `json:"score"`
+	Counts      Counts                  `json:"counts"`
+	Violations  []string                `json:"governance_violations,omitempty"`
+	FixQueue    []report.FixItem        `json:"fix_queue,omitempty"`
+	Unassessed  []report.UnassessedItem `json:"unassessed,omitempty"`
+	Environment *report.Environment     `json:"environment,omitempty"`
+	Results     []rules.Result          `json:"results,omitempty"`
+	Surfaces    []SurfaceVerdict        `json:"surfaces,omitempty"` // set only for multi-surface manifests
 }
 
 type Counts struct {
@@ -348,7 +353,7 @@ func renderResult(rec *report.Record) (*mcp.CallToolResult, ScanResult, error) {
 		Profile: rec.Profile, Level: rec.Level, Conformant: rec.Conformant,
 		Verdict: verdictString(rec.Conformant), Score: rec.Score,
 		Counts: countStatuses(rec), Violations: rec.Violations, FixQueue: rec.FixQueue,
-		Unassessed: rec.Unassessed, Results: rec.Results,
+		Unassessed: rec.Unassessed, Environment: rec.Environment, Results: rec.Results,
 	}
 	var buf bytes.Buffer
 	rec.Render(&buf)
