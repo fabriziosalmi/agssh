@@ -72,7 +72,10 @@ func browse(parent context.Context, chromePath, url, inject string, settle time.
 	defer cancelA()
 	ctx, cancel := chromedp.NewContext(allocCtx)
 	defer cancel()
-	ctx, cancelT := context.WithTimeout(ctx, 30*time.Second)
+	// Safety cap on a headless run (a hung browser must not wedge the check). 45s
+	// matches the CLI's default per-check budget and leaves headroom for a cold
+	// Chrome start under load / the race detector on CI, where 30s could flake.
+	ctx, cancelT := context.WithTimeout(ctx, 45*time.Second)
 	defer cancelT()
 
 	obs := newObs()
@@ -197,7 +200,10 @@ func browseEval(parent context.Context, chromePath, url, js string, settle time.
 	defer cancelA()
 	ctx, cancel := chromedp.NewContext(allocCtx)
 	defer cancel()
-	ctx, cancelT := context.WithTimeout(ctx, 30*time.Second)
+	// Safety cap on a headless run (a hung browser must not wedge the check). 45s
+	// matches the CLI's default per-check budget and leaves headroom for a cold
+	// Chrome start under load / the race detector on CI, where 30s could flake.
+	ctx, cancelT := context.WithTimeout(ctx, 45*time.Second)
 	defer cancelT()
 
 	var out string
