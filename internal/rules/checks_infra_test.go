@@ -102,12 +102,26 @@ func TestChkCAA(t *testing.T) {
 		answer(w, r, dns.RcodeSuccess)
 	})
 	noCAA := dnsTestServer(t, func(w dns.ResponseWriter, r *dns.Msg) { answer(w, r, dns.RcodeSuccess) })
+	// A zone that publishes ONLY iodef (a contact address, not an issuance
+	// restriction) pins issuance to no one — it must FAIL, not pass on mere CAA
+	// presence. (AG-DNS-01 drift fix.)
+	iodefOnly := dnsTestServer(t, func(w dns.ResponseWriter, r *dns.Msg) {
+		if len(r.Question) > 0 && r.Question[0].Qtype == dns.TypeCAA {
+			rr, _ := dns.NewRR(`example.test. 3600 IN CAA 0 iodef "mailto:sec@example.test"`)
+			answer(w, r, dns.RcodeSuccess, rr)
+			return
+		}
+		answer(w, r, dns.RcodeSuccess)
+	})
 
 	if out := chkCAA(t.Context(), &CheckCtx{Zone: "example.test", Resolver: withCAA}); out.Status != Pass {
-		t.Errorf("zone with CAA: got %s (%s), want PASS", out.Status, out.Err)
+		t.Errorf("zone with issue CAA: got %s (%s), want PASS", out.Status, out.Err)
 	}
 	if out := chkCAA(t.Context(), &CheckCtx{Zone: "example.test", Resolver: noCAA}); out.Status != Fail {
 		t.Errorf("zone without CAA: got %s, want FAIL", out.Status)
+	}
+	if out := chkCAA(t.Context(), &CheckCtx{Zone: "example.test", Resolver: iodefOnly}); out.Status != Fail {
+		t.Errorf("iodef-only zone (no issue/issuewild): got %s, want FAIL", out.Status)
 	}
 	if out := chkCAA(t.Context(), &CheckCtx{Zone: ""}); out.Status != Inconclusive {
 		t.Errorf("no zone: got %s, want INCONCLUSIVE", out.Status)

@@ -6,6 +6,31 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **AG-DNS-01 now requires a CAA policy that actually restricts issuance
+  (conformance-affecting).** The title is "CAA pins certificate issuance", but the
+  checker passed on *any* CAA record of any tag — a zone publishing only
+  `iodef "mailto:…"` (a contact address, which pins issuance to no one) got a green
+  PASS. It now requires at least one `issue`/`issuewild` property (`issue ";"`,
+  which forbids all issuance, still counts). A zone with only iodef/contact CAA now
+  correctly FAILs. (title-vs-checker drift audit, RUN-10 follow-up)
+- **Five rules had evidence that oversold what the checker measures** — the RUN-10
+  class of drift, found by a 57-rule adversarial audit and fixed by making the
+  wording honest (no verdict change):
+  - **AG-CI-02** PASS no longer claims permissions are "scoped"/least-privilege
+    (the checker verifies only that no job uses `write-all` and every job is
+    covered) → "explicit permissions declared …; none grant write-all".
+  - **AG-SUP-05** PASS "no source maps in dist" → "no .map files in dist" (it flags
+    `.map` filenames, not inline/`sourceMappingURL` maps).
+  - **AG-CSP-05** FAIL Expected dropped the unmeasured "or all sources https"
+    alternative → "upgrade-insecure-requests directive present".
+  - **AG-PRV-06** FAIL Expected "restrictive sandbox" → "a sandbox attribute" (the
+    checker verifies presence, not restrictiveness).
+  - **AG-NET-05** PASS no longer reads as a demonstrated offline proof → "no
+    third-party responses during load (a necessary condition for offline operation;
+    the network was not cut)".
+
 ### Added
 
 - **The Meta Pixel is detected again, by path.** `connect.facebook.net` is

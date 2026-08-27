@@ -138,7 +138,7 @@ func chkLeastPriv(_ context.Context, c *CheckCtx) Outcome {
 			}
 		}
 	}
-	return okay("every job runs with explicit, scoped permissions", "")
+	return okay("explicit permissions declared (top-level or per-job); none grant write-all", "")
 }
 
 // AG-CI-03: untrusted code is not built in a privileged context — i.e. a

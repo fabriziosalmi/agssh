@@ -59,7 +59,11 @@ func dnsQuery(resolver, zone string, qtype uint16, wantDO bool) (*dns.Msg, error
 	return resp, err
 }
 
-// AG-DNS-01: a CAA policy exists on the zone.
+// AG-DNS-01: a CAA policy RESTRICTS certificate issuance on the zone. It is not
+// enough that some CAA record exists — a zone that publishes only iodef (a
+// contact address) or another non-issuance tag pins issuance to no one. The MUST
+// (title: "CAA pins certificate issuance") requires at least one issue/issuewild
+// property. `issue ";"` counts: it forbids all issuance, a valid restriction.
 func chkCAA(_ context.Context, c *CheckCtx) Outcome {
 	if c.Zone == "" {
 		return inconclusive("no dns.zone declared in manifest")
@@ -72,16 +76,27 @@ func chkCAA(_ context.Context, c *CheckCtx) Outcome {
 	if err != nil {
 		return inconclusive("CAA query failed: " + err.Error())
 	}
-	var issuers []string
+	var records []string
+	restricts := false
 	for _, rr := range resp.Answer {
 		if caa, ok := rr.(*dns.CAA); ok {
-			issuers = append(issuers, caa.Tag+":"+caa.Value)
+			records = append(records, caa.Tag+":"+caa.Value)
+			switch strings.ToLower(caa.Tag) { // CAA tags are case-insensitive
+			case "issue", "issuewild":
+				restricts = true
+			}
 		}
 	}
-	if len(issuers) == 0 {
-		return bad("no CAA records", "a CAA policy restricting issuance")
+	if !restricts {
+		observed := "no issue/issuewild CAA property"
+		if len(records) > 0 {
+			observed += " (present: " + strings.Join(records, " ") + ")"
+		} else {
+			observed = "no CAA records"
+		}
+		return bad(observed, "a CAA policy restricting issuance (issue/issuewild)")
 	}
-	return okay("CAA present: "+strings.Join(issuers, " "), "")
+	return okay("CAA restricts issuance: "+strings.Join(records, " "), "")
 }
 
 // AG-DNS-02: the zone is DNSSEC-signed (AD bit from a validating resolver, or
@@ -447,7 +462,7 @@ func chkNoSourceMaps(_ context.Context, c *CheckCtx) Outcome {
 	if len(found) > 0 {
 		return bad("source maps shipped: "+strings.Join(found, ", "), "no .map files in production output")
 	}
-	return okay("no source maps in dist", "")
+	return okay("no .map files in dist", "")
 }
 
 // AG-SUP-06: no known-vulnerable dependencies (osv-scanner). The exit code is

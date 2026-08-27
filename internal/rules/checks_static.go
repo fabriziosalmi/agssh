@@ -567,7 +567,7 @@ func chkUpgradeInsecure(_ context.Context, c *CheckCtx) Outcome {
 	if pol.Has("upgrade-insecure-requests") {
 		return okay("upgrade-insecure-requests set", "")
 	}
-	return bad("no upgrade-insecure-requests", "upgrade-insecure-requests, or all sources https")
+	return bad("no upgrade-insecure-requests", "upgrade-insecure-requests directive present")
 }
 
 // AG-CSP-06: Trusted Types required for DOM sinks.
@@ -812,7 +812,7 @@ func chkEmbedsSandboxed(_ context.Context, c *CheckCtx) Outcome {
 	}
 	for _, e := range collectEls(c.Doc.Body, "iframe") {
 		if _, ok := e.attr["sandbox"]; !ok {
-			return bad("iframe without sandbox: "+e.attr["src"], "every iframe carries a restrictive sandbox")
+			return bad("iframe without sandbox: "+e.attr["src"], "every iframe carries a sandbox attribute")
 		}
 	}
 	return okay("iframes sandboxed (or none)", "")
