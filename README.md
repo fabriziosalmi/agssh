@@ -36,10 +36,13 @@ Single static Go binary. Native DNS (`miekg/dns`) and TLS (`crypto/tls`) — no
 
 A rule the runner cannot conclusively verify returns `INCONCLUSIVE`, and the
 gate treats that exactly like `FAIL`. Nothing is green unless proven — a missing
-scanner, an unreachable surface, or a check not implemented in this build all
-block. The gate fails on **any** failing MUST, **any** unwaived failing SHOULD,
-or **any** governance violation. Exit codes: `0` conformant, `1`
-non-conformant, `2` usage/internal error.
+scanner or a check not implemented in this build both block. The gate fails on
+**any** failing MUST, **any** unwaived failing SHOULD, or **any** governance
+violation. A surface whose live deployment **cannot be fetched at all** is not
+scored against — it is reported as `UNSCANNABLE` (with the transport cause) and
+emits no verdict, score, or badge, so an unreachable host can never masquerade as
+a low score. Exit codes: `0` conformant, `1` non-conformant, `2` usage/internal
+error, `3` a surface was unscannable.
 
 ### Build & run
 

@@ -51,6 +51,8 @@ type Record struct {
 	Surface        string         `json:"surface"`
 	Profile        string         `json:"profile"`
 	Level          string         `json:"level"`
+	Unscannable    bool           `json:"unscannable,omitempty"`
+	Unreachable    string         `json:"unreachable_reason,omitempty"`
 	Conformant     bool           `json:"conformant"`
 	Score          Score          `json:"score"`
 	Results        []rules.Result `json:"results"`
@@ -99,11 +101,22 @@ func BuildFixQueue(results []rules.Result) []FixItem {
 
 // Render writes a concise terminal summary.
 func (r *Record) Render(w io.Writer) {
+	fmt.Fprintf(w, "\nAGSSH-STD-001 %s — %s @ %s/%s\n", r.Version, r.Surface, r.Profile, r.Level)
+
+	// A surface the runner never fetched yields no observations: emitting a
+	// verdict, score, or badge would be a claim about something it never saw.
+	// Report it as UNSCANNABLE with the transport cause and stop here.
+	if r.Unscannable {
+		fmt.Fprintf(w, "Verdict: UNSCANNABLE — %s\n", r.Unreachable)
+		fmt.Fprintln(w, "The surface could not be fetched; no score, fix queue, or badge is emitted.")
+		fmt.Fprintln(w)
+		return
+	}
+
 	verdict := "NON-CONFORMANT"
 	if r.Conformant {
 		verdict = "CONFORMANT"
 	}
-	fmt.Fprintf(w, "\nAGSSH-STD-001 %s — %s @ %s/%s\n", r.Version, r.Surface, r.Profile, r.Level)
 	fmt.Fprintf(w, "Verdict: %s   Score: %d/%d (%.0f%%)   Deviation debt: %d\n",
 		verdict, r.Score.Earned, r.Score.Possible, r.Score.Pct, r.Score.DeviationDebt)
 
