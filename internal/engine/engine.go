@@ -180,7 +180,8 @@ func Evaluate(cfg *manifest.Config, surface manifest.Surface, opts Options) *rep
 	// 7) Gate (fail-closed) + score + fix queue.
 	rec.Conformant = gate(rec.Results, violations)
 	rec.Score = score(rec.Results, active, byID)
-	rec.FixQueue = report.BuildFixQueue(rec.Results)
+	rec.FixQueue = report.BuildFixQueue(rec.Results)     // FAIL only — actionable
+	rec.Unassessed = report.BuildUnassessed(rec.Results) // INCONCLUSIVE — could not verify
 	return rec
 }
 
