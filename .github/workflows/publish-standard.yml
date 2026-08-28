@@ -1,76 +1,62 @@
 # Publish agssh.dev — the standard's own site — and make it wear its own Gold badge.
 #
-# Flow (the dogfood loop): build the CSP-clean site -> deploy to GitHub Pages ->
-# once live behind Cloudflare, scan agssh.dev at Gold/L0 with a signed record,
-# emit an SBOM + the scan-derived badge, GATE on conformance, and push the proof
-# back to the site. Fail-closed: if the live site is not Gold-conformant, this
-# workflow goes red.
+# Pages source = GitHub Actions (not a branch). The dogfood loop, in one run:
+#   1. build the CSP-clean site  ->  deploy content to Pages
+#   2. once live behind Cloudflare, scan agssh.dev at Gold/L0 with a SIGNED record,
+#      emit an SBOM + the scan-derived badge, and GATE (fail-closed)
+#   3. re-deploy the site WITH the fresh badge + signed record + SBOM
+# so the page shows a Gold medal that reproduces from its own conformance record.
 #
 # PREREQUISITES (one-time, see standard/DEPLOY.md):
-#   - GitHub Pages source set to the `gh-pages` branch.
-#   - Cloudflare in front of agssh.dev injecting the headers + TLS + CAA/DNSSEC.
-# Until the Cloudflare edge is live, the verify job will (correctly) fail — the
-# header/CSP/DNS rules need it. That is the gate doing its job, not a bug.
+#   - Settings -> Pages -> Source = GitHub Actions, Custom domain = agssh.dev
+#   - Cloudflare in front of agssh.dev injecting the headers + TLS + CAA/DNSSEC
+# Until the Cloudflare edge is live, step 2 (the gate) will correctly fail — the
+# header/CSP/DNS rules need it. That is the gate working, not a bug. Manual-only
+# (workflow_dispatch) until then; add a push trigger once it goes green.
 name: publish-standard
 
 on:
-  # Manual-only until the Cloudflare edge + Pages source are live (see DEPLOY.md).
-  # Once agssh.dev serves behind Cloudflare, add the `push:` trigger below so every
-  # standard change republishes and re-gates automatically.
   workflow_dispatch:
   # push:
   #   branches: [main]
   #   paths: ["standard/**", "RULES.md", "internal/rules/version_gen.go", ".github/workflows/publish-standard.yml"]
 
 permissions:
-  contents: write        # push the built site + proof to the gh-pages branch
+  contents: read
+  pages: write
+  id-token: write        # Pages deploy + keyless cosign (AG-GOV-05) from an ephemeral runner (AG-GOV-07)
 
 concurrency:
-  group: publish-standard
+  group: pages
   cancel-in-progress: false
 
 jobs:
-  deploy:
+  publish:
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          fetch-depth: 0
-      - name: Build the CSP-clean site
-        run: |
-          python3 standard/build_site.py          # site/ (index.html, css, PDF, CNAME)
-          # Carry the previous run's proof forward so the badge/record don't 404
-          # between a content deploy and the verify job that refreshes them.
-          git fetch origin gh-pages --depth=1 || true
-          for f in badge.svg conformance.json sbom.spdx.json; do
-            git show origin/gh-pages:"$f" > "site/$f" 2>/dev/null || true
-          done
-      - name: Publish to the gh-pages branch
-        run: |
-          cd site
-          git init -q
-          git config user.name  "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -q -m "publish: agssh.dev (${GITHUB_SHA::7})"
-          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" HEAD:gh-pages
-
-  verify:
-    needs: deploy
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      id-token: write      # keyless cosign OIDC (AG-GOV-05) from an ephemeral runner (AG-GOV-07)
+    environment:
+      name: github-pages
+      url: https://agssh.dev/
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with: { go-version-file: go.mod }
-      - name: Tools (agssh, cosign, syft) — pinned by version
+
+      - name: Tools — agssh, cosign, syft (pinned by version)
         run: |
           go build -o /usr/local/bin/agssh ./cmd/agssh
           go install github.com/sigstore/cosign/v2/cmd/cosign@v2.4.1
           curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin v1.18.1
           echo "$HOME/go/bin" >> "$GITHUB_PATH"
+
+      # --- 1) build + deploy the content (badge/record 404 until step 3) ---
+      - name: Build the CSP-clean site
+        run: python3 standard/build_site.py
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
+        with: { path: site }
+      - id: deploy1
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5
+
+      # --- 2) scan the LIVE site at Gold, signed, and GATE ---
       - name: Wait for the new content to be live behind Cloudflare
         run: |
           for i in $(seq 1 30); do
@@ -79,23 +65,21 @@ jobs:
           done
           echo "::error::agssh.dev did not serve the new content in time"; exit 1
       - name: SBOM (AG-SUP-07) + provenance input (AG-SUP-08)
-        run: syft dir:. -o spdx-json > sbom.spdx.json
+        run: syft dir:. -o spdx-json > site/sbom.spdx.json
       - name: Gate — scan agssh.dev at Gold/L0, signed (fail-closed)
         run: |
           agssh -config standard/agssh.dev.airgap.yml \
                 -profile Gold -level L0 \
                 -repo . -workflows .github/workflows -dist . \
-                -sign -out conformance.json -badge badge.svg
-      - name: Push the fresh proof (badge + signed record + SBOM) to the site
-        if: success()
+                -sign -out site/conformance.json -badge site/badge.svg
+
+      # --- 3) re-deploy the site WITH the fresh proof (delete the first artifact) ---
+      - name: Refresh the Pages artifact with the proof
+        env: { GH_TOKEN: "${{ github.token }}" }
         run: |
-          tmp=$(mktemp -d); cp badge.svg conformance.json sbom.spdx.json "$tmp"/
-          cd "$tmp"; git init -q
-          git config user.name  "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git remote add origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
-          git fetch -q origin gh-pages && git checkout -q gh-pages
-          cp badge.svg conformance.json sbom.spdx.json .
-          git add badge.svg conformance.json sbom.spdx.json
-          git commit -q -m "proof: fresh Gold conformance for agssh.dev" || { echo "no change"; exit 0; }
-          git push -q origin gh-pages
+          aid=$(gh api "/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts" \
+                  --jq '.artifacts[] | select(.name=="github-pages") | .id' | head -1)
+          [ -n "$aid" ] && gh api -X DELETE "/repos/${{ github.repository }}/actions/artifacts/$aid" || true
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
+        with: { path: site }
+      - uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5
