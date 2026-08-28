@@ -19,7 +19,8 @@ Gold / L0** and wears its own `agssh`-generated badge. Three layers:
 
 | Setting | Value | Satisfies |
 |---|---|---|
-| DNS record | `agssh.dev` → GitHub Pages (`CNAME` to `fabriziosalmi.github.io`, CF proxy **ON** / orange cloud; apex uses CNAME-flattening) | AG-DNS-03 (no dangling) |
+| Pages source | **Settings → Pages → Source = GitHub Actions**, **Custom domain = `agssh.dev`** (the workflow also ships a `CNAME` file in the artifact) | serves this repo on the `agssh.dev` Host |
+| DNS record | apex `agssh.dev` → `fabriziosalmi.github.io` (`CNAME`, CF proxy **ON** / orange cloud; apex uses CNAME-flattening) | AG-DNS-03 (no dangling) |
 | SSL/TLS mode | **Full (strict)** | AG-TLS chain |
 | Minimum TLS Version | **TLS 1.2** | AG-HDR-08 (TLS floor) |
 | Always Use HTTPS | **On** | AG-CSP-05 / redirect |
