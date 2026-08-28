@@ -1,0 +1,40 @@
+# AGSSH-STD-001 conformance manifest for the standard's own site (agssh.dev).
+# The dogfood: the surface that publishes the standard is scanned against it at the
+# highest bar — Gold profile, L0 (strict air-gap), zero waivers. The header/CSP/TLS
+# rules are satisfied by Cloudflare in front of GitHub Pages (see standard/DEPLOY.md);
+# the supply/CI/governance rules are satisfied by the publish-standard.yml pipeline,
+# which also -signs the record (AG-GOV-05) from an ephemeral OIDC runner (AG-GOV-07).
+target_profile: Gold
+level: L0
+
+surfaces:
+  - url: https://agssh.dev/
+    kind: docs
+    generates_files: false      # a docs site, so AG-OUT-02 (deterministic output) is N/A
+    threaded_wasm: false        # no SharedArrayBuffer, so AG-HDR-06 (COOP/COEP) is N/A
+    has_service_worker: false
+    stateless: true             # no cookies / localStorage
+    paths:
+      - /AGSSH-STD-001-v1.5.1.pdf   # sample the PDF too (worst-case static analysis)
+
+backend: github-pages           # informational; the runner observes the live surface
+
+dns:
+  zone: agssh.dev               # CAA (issue/issuewild) + DNSSEC + dangling checks
+
+pipeline:
+  enforce_ci_rules: true        # apply the AG-CI family to this repo's workflows
+
+allow:                          # L0 is strict: everything empty — no third-party anything
+  connect:      []
+  storage:      []
+  embeds:       []
+  subresources: []
+
+waivers:                        # zero tolerance for the flagship surface
+  budget:
+    max_count: 0
+    max_weight: 0
+    max_window_days: 30
+
+deviations: []
