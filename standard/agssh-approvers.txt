@@ -1,0 +1,3 @@
+# Approvers allowed to sign SHOULD waivers for agssh.dev (AG-GOV-04, segregation
+# of duties: must differ from the change author). One identity per line.
+security@agssh.dev

@@ -146,6 +146,28 @@ footer a { color:var(--muted); text-decoration:underline; }
 """
 
 
+FAVICON = """\
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <path d="M16 2 4 7v9c0 7.5 5.1 12.2 12 14 6.9-1.8 12-6.5 12-14V7L16 2z" fill="#2563eb"/>
+  <path d="M22 12.5l-7.6 7.6L10 15.7l1.8-1.8 2.6 2.6 5.8-5.8 1.8 1.8z" fill="#fff"/>
+</svg>
+"""
+
+# Neutral placeholder — NO tier claim. The gate overwrites this with the real,
+# scan-derived medal once agssh.dev actually earns it.
+PLACEHOLDER_BADGE = """\
+<svg xmlns="http://www.w3.org/2000/svg" width="150" height="40" role="img" aria-label="AGSSH-STD-001 — self-verifying">
+  <rect width="150" height="40" rx="6" fill="#0f172a"/>
+  <text x="12" y="17" font-family="Verdana,sans-serif" font-size="11" fill="#e2e8f0" font-weight="bold">AGSSH-STD-001</text>
+  <text x="12" y="30" font-family="Verdana,sans-serif" font-size="9" fill="#93c5fd">self-verifying…</text>
+</svg>
+"""
+
+PENDING_JSON = ('{\n  "status": "pending",\n  "note": "This %s is produced by the '
+                'publish-standard workflow scanning the live agssh.dev at Gold, and '
+                'replaces this placeholder after the first successful gate."\n}\n')
+
+
 def rules_section(fams):
     out = ['<h2 id="rules">The 57 rules</h2>',
            '<p class="lead">Nine families, three cumulative profiles '
@@ -194,6 +216,7 @@ def build():
 <meta name="description" content="AGSSH-STD-001 — the Air-Gapped Static Surface Hardening standard. {n} property-based, fail-closed conformance rules for static and client-side web surfaces.">
 <meta name="color-scheme" content="light dark">
 <title>AGSSH-STD-001 — Air-Gapped Static Surface Hardening</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="agssh-std.css">
 </head>
 <body>
@@ -258,6 +281,21 @@ def build():
         f.write(doc)
     with open(os.path.join(_site, "agssh-std.css"), "w") as f:
         f.write(CSS)
+    # Same-origin favicon (no /favicon.ico 404; CSP img-src 'self' allows it).
+    with open(os.path.join(_site, "favicon.svg"), "w") as f:
+        f.write(FAVICON)
+    # Placeholders for the proof artifacts so the content deploy 404s nothing; the
+    # publish-standard gate OVERWRITES these with the real scan-derived files
+    # (badge.svg, the signed conformance.json, the syft SBOM) on its second deploy.
+    # The placeholder badge makes NO tier claim — a Gold medal appears only once the
+    # live scan actually earns it.
+    for fn, body in [("badge.svg", PLACEHOLDER_BADGE),
+                     ("conformance.json", PENDING_JSON % "conformance record"),
+                     ("sbom.spdx.json", PENDING_JSON % "SBOM")]:
+        p = os.path.join(_site, fn)
+        if not os.path.exists(p):     # never clobber a real artifact the gate placed
+            with open(p, "w") as f:
+                f.write(body)
     pdf_src = os.path.join(_here, PDF_NAME)
     if os.path.exists(pdf_src):
         shutil.copy2(pdf_src, os.path.join(_site, PDF_NAME))

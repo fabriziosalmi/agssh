@@ -71,6 +71,7 @@ jobs:
           agssh -config standard/agssh.dev.airgap.yml \
                 -profile Gold -level L0 \
                 -repo . -workflows .github/workflows -dist . \
+                -author "${{ github.actor }}" -approvers standard/agssh-approvers.txt \
                 -sign -out site/conformance.json -badge site/badge.svg
 
       # --- 3) re-deploy the site WITH the fresh proof (delete the first artifact) ---
