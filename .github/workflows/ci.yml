@@ -32,7 +32,7 @@ jobs:
       - name: rule manifest must not be stale vs the spec
         run: |
           python3 standard/build_pdf.py
-          git diff --exit-code -- internal/rules/manifest.yaml internal/rules/version_gen.go \
+          git diff --exit-code -- internal/rules/manifest.yaml internal/rules/version_gen.go RULES.md \
             || { echo "::error::generated files drifted from standard/build_pdf.py — regenerate: cd standard && python build_pdf.py"; exit 1; }
       - name: hand-written docs must match the generator (count + version)
         run: python3 standard/sync_readme.py --check

@@ -2,12 +2,10 @@
 
 ## Supported versions
 
-`agssh` follows the latest release. Security fixes land on `main` and are shipped
-in the next tagged release.
-
-| Version | Supported |
-|---------|-----------|
-| 1.0.x   | ✅        |
+Only the **most recent tagged release** is supported: security fixes land on `main`
+and ship in the next tag, and `agssh` is a single self-contained binary, so
+upgrading is a drop-in. Pin to a SHA (or a full `vX.Y.Z` tag) in CI and bump it to
+pick up fixes; the moving `@v1` tag always resolves to the newest release.
 
 ## Reporting a vulnerability
 
