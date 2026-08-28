@@ -1,11 +1,14 @@
 # Publish agssh.dev — the standard's own site — and make it wear its own Gold badge.
 #
-# Pages source = GitHub Actions (not a branch). The dogfood loop, in one run:
-#   1. build the CSP-clean site  ->  deploy content to Pages
-#   2. once live behind Cloudflare, scan agssh.dev at Gold/L0 with a SIGNED record,
-#      emit an SBOM + the scan-derived badge, and GATE (fail-closed)
-#   3. re-deploy the site WITH the fresh badge + signed record + SBOM
-# so the page shows a Gold medal that reproduces from its own conformance record.
+# Pages source = GitHub Actions (not a branch). Pages allows ONE artifact per run,
+# so the dogfood loop is a single deploy that bakes in the proof up front:
+#   1. build the CSP-clean site
+#   2. scan the CURRENTLY-live agssh.dev at Gold/L0 with a SIGNED record, emit an
+#      SBOM + the scan-derived badge, and write them into the site
+#   3. deploy once (content + fresh badge + signed record + SBOM), then GATE
+# The badge reflects the live deployment — one run behind for content changes, but
+# the site is deterministic so it stays accurate — and never 404s. The gate reddens
+# the run when the live surface is not Gold; the honest badge is deployed regardless.
 #
 # PREREQUISITES (one-time, see standard/DEPLOY.md):
 #   - Settings -> Pages -> Source = GitHub Actions, Custom domain = agssh.dev
@@ -48,31 +51,29 @@ jobs:
           curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin v1.18.1
           echo "$HOME/go/bin" >> "$GITHUB_PATH"
 
-      # --- 1) build + deploy the content (badge/record 404 until step 3) ---
+      # Single deploy (Pages=Actions allows one artifact per run). Scan the CURRENTLY
+      # live agssh.dev to derive the badge/record, bake them into the site, and
+      # deploy once. The badge reflects the live deployment (one run behind for
+      # content changes; the site is deterministic, so it stays accurate) and never
+      # 404s. No second upload, so no artifact-name conflict.
       - name: Build the CSP-clean site
         run: python3 standard/build_site.py
-      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
-        with: { path: site }
-      - id: deploy1
-        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5
-
-      # --- 2) scan the LIVE site at Gold, signed, and GATE ---
-      - name: Wait for the new content to be live behind Cloudflare
+      - name: Wait for agssh.dev to be reachable
         run: |
           for i in $(seq 1 30); do
-            if curl -fsS -m 10 https://agssh.dev/ | grep -q "AGSSH-STD-001"; then echo "live"; exit 0; fi
-            echo "not live yet ($i/30)…"; sleep 20
+            curl -fsS -m 10 https://agssh.dev/ | grep -q "AGSSH-STD-001" && { echo "live"; exit 0; }
+            echo "not reachable yet ($i/30)…"; sleep 20
           done
-          echo "::error::agssh.dev did not serve the new content in time"; exit 1
+          echo "::error::agssh.dev unreachable"; exit 1
       - name: SBOM (AG-SUP-07) + provenance input (AG-SUP-08)
         run: syft dir:. -o spdx-json > site/sbom.spdx.json
       - name: Scan agssh.dev at Gold/L0, signed — produce the HONEST badge + record
         id: scan
         run: |
-          # The badge is a pure function of the record: conformant -> the metal
-          # tier, non-conformant -> the grey target tier + score. Deploy it either
-          # way (below) so the page always shows the truth; the gate at the end is
-          # what fails the workflow. So capture the exit code, do not stop here.
+          # The badge is a pure function of the record: conformant -> the metal tier,
+          # non-conformant -> the grey target tier + score. It is baked into the site
+          # below WHATEVER the verdict, so the page always shows the truth; the final
+          # gate is what fails the run. Capture the exit code, do not stop here.
           set +e
           agssh -config standard/agssh.dev.airgap.yml \
                 -profile Gold -level L0 \
@@ -80,20 +81,12 @@ jobs:
                 -author "${{ github.actor }}" -approvers standard/agssh-approvers.txt \
                 -sign -out site/conformance.json -badge site/badge.svg
           echo "code=$?" >> "$GITHUB_OUTPUT"
-
-      # --- 3) re-deploy the site WITH the fresh proof — WHATEVER the verdict ---
-      - name: Refresh the Pages artifact with the proof
-        env: { GH_TOKEN: "${{ github.token }}" }
-        run: |
-          aid=$(gh api "/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts" \
-                  --jq '.artifacts[] | select(.name=="github-pages") | .id' | head -1)
-          [ -n "$aid" ] && gh api -X DELETE "/repos/${{ github.repository }}/actions/artifacts/$aid" || true
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
         with: { path: site }
       - uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5
 
-      # --- 4) fail-closed gate: the honest badge is live; now redden the run if
-      #        agssh.dev is not Gold-conformant (0 = conformant, 1 = not, 3 = unscannable).
+      # Fail-closed gate: the honest badge is now live; redden the run unless
+      # agssh.dev is Gold-conformant (0 = conformant, 1 = not, 3 = unscannable).
       - name: Gate — fail the run unless agssh.dev is Gold-conformant
         run: |
           [ "${{ steps.scan.outputs.code }}" = "0" ] \
