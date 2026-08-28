@@ -1,0 +1,15 @@
+# gitleaks config for agssh (AG-SUP-04 scans the shipped repo for secrets).
+# Extend the default ruleset, then allowlist known-safe, secret-free data files.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Curated data catalogs that are hostnames/identifiers, not secrets"
+# internal/rules/trackers.go is the analytics/tracker HOST catalog — strings like
+# api2.amplitude.com trip the generic-api-key heuristic but are public vendor
+# hostnames, never credentials. manifest.yaml / version_gen.go are generated.
+paths = [
+  '''internal/rules/trackers\.go''',
+  '''internal/rules/manifest\.yaml''',
+  '''internal/rules/version_gen\.go''',
+]
