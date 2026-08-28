@@ -5,4 +5,4 @@ package rules
 
 // StandardVersion is the AGSSH-STD-001 document version this build of the
 // runner implements, derived from the newest CHANGELOG.md release heading.
-const StandardVersion = "v1.5.1"
+const StandardVersion = "v1.6.0"

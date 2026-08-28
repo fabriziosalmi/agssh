@@ -15,7 +15,7 @@ surfaces:
     has_service_worker: false
     stateless: true             # no cookies / localStorage
     paths:
-      - /AGSSH-STD-001-v1.5.1.pdf   # sample the PDF too (worst-case static analysis)
+      - /AGSSH-STD-001-v1.6.0.pdf   # sample the PDF too (worst-case static analysis)
 
 backend: github-pages           # informational; the runner observes the live surface
 

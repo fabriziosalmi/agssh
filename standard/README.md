@@ -1,6 +1,6 @@
 # AGSSH-STD-001 — the standard
 
-<!-- agssh:std-pdf -->`AGSSH-STD-001-v1.5.1.pdf`<!-- /agssh:std-pdf --> is the rendered standard. `build_pdf.py` is its
+<!-- agssh:std-pdf -->`AGSSH-STD-001-v1.6.0.pdf`<!-- /agssh:std-pdf --> is the rendered standard. `build_pdf.py` is its
 canonical source: the rules are structured data in this script, which emits both
 the PDF and (the basis for) the runner's rule manifest. Edit rules here so the
 document and the `agssh` runner stay in sync.
