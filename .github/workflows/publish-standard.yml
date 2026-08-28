@@ -66,15 +66,22 @@ jobs:
           echo "::error::agssh.dev did not serve the new content in time"; exit 1
       - name: SBOM (AG-SUP-07) + provenance input (AG-SUP-08)
         run: syft dir:. -o spdx-json > site/sbom.spdx.json
-      - name: Gate — scan agssh.dev at Gold/L0, signed (fail-closed)
+      - name: Scan agssh.dev at Gold/L0, signed — produce the HONEST badge + record
+        id: scan
         run: |
+          # The badge is a pure function of the record: conformant -> the metal
+          # tier, non-conformant -> the grey target tier + score. Deploy it either
+          # way (below) so the page always shows the truth; the gate at the end is
+          # what fails the workflow. So capture the exit code, do not stop here.
+          set +e
           agssh -config standard/agssh.dev.airgap.yml \
                 -profile Gold -level L0 \
                 -repo . -workflows .github/workflows -dist . \
                 -author "${{ github.actor }}" -approvers standard/agssh-approvers.txt \
                 -sign -out site/conformance.json -badge site/badge.svg
+          echo "code=$?" >> "$GITHUB_OUTPUT"
 
-      # --- 3) re-deploy the site WITH the fresh proof (delete the first artifact) ---
+      # --- 3) re-deploy the site WITH the fresh proof — WHATEVER the verdict ---
       - name: Refresh the Pages artifact with the proof
         env: { GH_TOKEN: "${{ github.token }}" }
         run: |
@@ -84,3 +91,11 @@ jobs:
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
         with: { path: site }
       - uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5
+
+      # --- 4) fail-closed gate: the honest badge is live; now redden the run if
+      #        agssh.dev is not Gold-conformant (0 = conformant, 1 = not, 3 = unscannable).
+      - name: Gate — fail the run unless agssh.dev is Gold-conformant
+        run: |
+          [ "${{ steps.scan.outputs.code }}" = "0" ] \
+            || { echo "::error::agssh.dev is not Gold-conformant (agssh exit ${{ steps.scan.outputs.code }}); the deployed badge reflects the current state"; exit 1; }
+          echo "agssh.dev is Gold-conformant — the medal is earned."
