@@ -6,6 +6,20 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **AG-CI-04 is now implemented — Silver/Gold were previously unreachable.**
+  `AG-CI-04` ("Secrets are not exposed to forks or echoed") is a **MUST**, but its
+  checker was a `todo()` stub that always returned `INCONCLUSIVE`. Fail-closed
+  treats `INCONCLUSIVE` as a block, and a MUST can never be waived (AG-GOV-01), so
+  **no surface could reach Silver or Gold** — the rule blocked every scan at those
+  profiles. It now statically analyses the workflows: a secret echoed/printf'd to
+  the log (excluding `::add-mask::` and writes to `$GITHUB_ENV`/`$GITHUB_OUTPUT`)
+  fails, and any `${{ secrets.* }}` referenced inside a `pull_request_target`
+  workflow fails; `github.token` and secrets in trusted-event jobs are fine.
+  Surfaced by dogfooding the Gold scan against the standard's own site. (a
+  self-blocking gap in the standard, of the RUN-02/03 class)
+
 ## [1.5.1] — 2026-08-27
 
 ### Changed

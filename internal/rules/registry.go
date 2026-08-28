@@ -58,7 +58,7 @@ func All() []Rule {
 		{"AG-CI-01", "Pin Actions to a 40-char SHA", "AG-CI", Must, High, S, PlaneCI, always, chkPinnedActions},
 		{"AG-CI-02", "Least-privilege workflow tokens", "AG-CI", Must, High, S, PlaneCI, always, chkLeastPriv},
 		{"AG-CI-03", "No untrusted code in privileged context", "AG-CI", Must, Critical, S, PlaneCI, always, chkNoUntrustedPriv},
-		{"AG-CI-04", "Secrets are not exposed to forks", "AG-CI", Must, High, S, PlaneCI, always, todo("audit pull_request workflows for secret exposure")},
+		{"AG-CI-04", "Secrets are not exposed to forks", "AG-CI", Must, High, S, PlaneCI, always, chkNoSecretExposure},
 		{"AG-CI-05", "Protected branch + required checks", "AG-CI", Should, Medium, S, PlaneCI, always, chkBranchProtection},
 		{"AG-CI-06", "Automated contributors under the same gate", "AG-CI", Should, Medium, G, PlaneCI, always, todo("verify bot PRs run the required check")},
 

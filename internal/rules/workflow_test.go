@@ -80,3 +80,32 @@ func TestChkNoUntrustedPriv(t *testing.T) {
 		})
 	}
 }
+
+func TestChkNoSecretExposure(t *testing.T) {
+	cases := []struct {
+		name string
+		yaml string
+		want Status
+	}{
+		{"clean, no secrets", "on: push\njobs:\n  b:\n    steps:\n      - run: echo hello\n", Pass},
+		{"secret in a trusted job (login) is fine", "on:\n  push:\n    tags: [\"v*\"]\njobs:\n  rel:\n    steps:\n      - uses: docker/login-action@abc\n        with:\n          password: ${{ secrets.GITHUB_TOKEN }}\n", Pass},
+		{"echoed secret leaks", "on: push\njobs:\n  b:\n    steps:\n      - run: echo ${{ secrets.API_KEY }}\n", Fail},
+		{"printf secret leaks", "on: push\njobs:\n  b:\n    steps:\n      - run: printf '%s' ${{ secrets.TOKEN }}\n", Fail},
+		{"add-mask is not a leak", "on: push\njobs:\n  b:\n    steps:\n      - run: echo \"::add-mask::${{ secrets.TOKEN }}\"\n", Pass},
+		{"writing to GITHUB_ENV is a redacted sink", "on: push\njobs:\n  b:\n    steps:\n      - run: echo \"T=${{ secrets.TOKEN }}\" >> $GITHUB_ENV\n", Pass},
+		{"secret in pull_request_target is exposed", "on: pull_request_target\njobs:\n  b:\n    steps:\n      - run: gh pr comment --token ${{ secrets.PAT }}\n", Fail},
+		{"github.token is not a secrets ref", "on: push\njobs:\n  b:\n    steps:\n      - run: gh api --token ${{ github.token }}\n", Pass},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out := chkNoSecretExposure(t.Context(), &CheckCtx{WorkflowsDir: workflowsDir(t, map[string]string{"wf.yml": tc.yaml})})
+			if out.Status != tc.want {
+				t.Errorf("got %s (%s / %s), want %s", out.Status, out.Evidence.Observed, out.Err, tc.want)
+			}
+		})
+	}
+	// No workflows -> INCONCLUSIVE (fail-closed).
+	if out := chkNoSecretExposure(t.Context(), &CheckCtx{WorkflowsDir: t.TempDir()}); out.Status != Inconclusive {
+		t.Errorf("no workflows: got %s, want INCONCLUSIVE", out.Status)
+	}
+}

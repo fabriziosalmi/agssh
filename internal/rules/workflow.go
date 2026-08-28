@@ -5,10 +5,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"gopkg.in/yaml.v3"
 )
+
+// secretRefRe matches a workflow secret expansion, e.g. ${{ secrets.MY_TOKEN }}.
+// github.token / GITHUB_TOKEN passed implicitly is not a `secrets.` reference.
+var secretRefRe = regexp.MustCompile(`\$\{\{\s*secrets\.[A-Za-z_][A-Za-z0-9_-]*\s*\}\}`)
 
 // ---------- CI / pipeline (parsed, not grepped) ----------
 //
@@ -174,6 +179,65 @@ func chkNoUntrustedPriv(_ context.Context, c *CheckCtx) Outcome {
 		}
 	}
 	return okay("no untrusted-code-in-privileged-context pattern", "")
+}
+
+// AG-CI-04: no secret is printed to the build log, and no secret reaches a
+// fork-triggered (pull_request_target) workflow. Two static checks over the raw
+// workflow text: an echo/printf/cat of ${{ secrets.* }} to stdout (a log leak),
+// and any secret reference inside a pull_request_target workflow (a
+// fork-influenceable context that runs with the base repo's secrets).
+// GITHUB_TOKEN in a non-fork-triggered job is fine; masking is defence-in-depth,
+// not the control, so it does not make an echoed secret acceptable.
+func chkNoSecretExposure(_ context.Context, c *CheckCtx) Outcome {
+	files := workflowFiles(c.WorkflowsDir)
+	if len(files) == 0 {
+		return inconclusive("no workflow files at " + c.WorkflowsDir)
+	}
+	for _, f := range files {
+		raw, err := os.ReadFile(f)
+		if err != nil {
+			return inconclusive("cannot read workflow " + filepath.Base(f))
+		}
+		var wf ghWorkflow
+		if yaml.Unmarshal(raw, &wf) != nil {
+			return inconclusive("unparseable workflow: " + filepath.Base(f))
+		}
+		name := filepath.Base(f)
+		if line := echoedSecretLine(string(raw)); line != "" {
+			return bad(name+": secret printed to the log — "+line,
+				"never echo/printf ${{ secrets.* }} (masking is defence-in-depth, not the control)")
+		}
+		if workflowEvents(wf.On)["pull_request_target"] && secretRefRe.Match(raw) {
+			return bad(name+": ${{ secrets.* }} referenced in a pull_request_target workflow",
+				"gate secret-using jobs to trusted events; keep secrets out of pull_request_target")
+		}
+	}
+	return okay("no secrets echoed or exposed to fork-triggered jobs", "")
+}
+
+// echoedSecretLine returns a trimmed run-script line that prints a secret to
+// stdout, or "" if none. It ignores the safe idioms: registering a mask
+// (::add-mask::) and writing to $GITHUB_ENV / $GITHUB_OUTPUT (redacted sinks).
+func echoedSecretLine(text string) string {
+	for _, ln := range strings.Split(text, "\n") {
+		if !secretRefRe.MatchString(ln) {
+			continue
+		}
+		low := strings.ToLower(ln)
+		if !strings.Contains(low, "echo") && !strings.Contains(low, "printf") && !strings.Contains(low, "cat ") {
+			continue
+		}
+		if strings.Contains(low, "add-mask") ||
+			strings.Contains(ln, "GITHUB_ENV") || strings.Contains(ln, "GITHUB_OUTPUT") {
+			continue // masking / a redacted sink, not a log leak
+		}
+		s := strings.TrimSpace(ln)
+		if len(s) > 100 {
+			s = s[:100] + "…"
+		}
+		return s
+	}
+	return ""
 }
 
 // workflowEvents collects the trigger event names from an `on:` node, which may
