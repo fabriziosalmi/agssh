@@ -6,19 +6,40 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.6.0] — 2026-08-28
+
+### Added
+
+- **AG-CI-04 secret-exposure checker is now implemented — Silver/Gold were
+  previously unreachable.** `AG-CI-04` ("Secrets are not exposed to forks") is a
+  **MUST**, but its checker was a `todo()` stub that always returned
+  `INCONCLUSIVE`. Fail-closed treats `INCONCLUSIVE` as a block, and a MUST can
+  never be waived (AG-GOV-01), so **no surface could reach Silver or Gold** — the
+  rule blocked every scan at those profiles. It now statically analyses the
+  workflows: a secret echoed/printf'd to the log (excluding `::add-mask::` and
+  writes to `$GITHUB_ENV`/`$GITHUB_OUTPUT`) fails, and any `${{ secrets.* }}`
+  referenced inside a `pull_request_target` workflow fails; `github.token` and
+  secrets in trusted-event jobs are fine. Verdict-affecting for every surface
+  targeting Silver/Gold. Surfaced by dogfooding the Gold scan against the
+  standard's own site. (a self-blocking gap in the standard, of the RUN-02/03 class)
+- **The standard now publishes its own site at [agssh.dev](https://agssh.dev),
+  wearing its own badge.** A manual `publish-standard` workflow builds a CSP-clean
+  page (external stylesheet, zero inline styles/scripts, same-origin subresources
+  only), scans the live surface at **Gold/L0** with a cosign-signed conformance
+  record (AG-GOV-05) + SBOM, and deploys the scan-derived badge — the standard
+  eating its own dog food. The five process-specific SHOULD rules (AG-CSP-04,
+  AG-HDR-07, AG-SUP-03/08, AG-CI-06) are covered by governed, expiring,
+  dual-approved waivers (AG-GOV-02/03/04). Header/CSP/TLS/DNS rules are satisfied
+  by a Cloudflare edge in front of GitHub Pages (see `standard/DEPLOY.md`).
+- **Serious README overhaul + a generated `RULES.md` reference** covering all 57
+  rules across the 9 families, the three cumulative profiles, and the three levels.
+
 ### Fixed
 
-- **AG-CI-04 is now implemented — Silver/Gold were previously unreachable.**
-  `AG-CI-04` ("Secrets are not exposed to forks or echoed") is a **MUST**, but its
-  checker was a `todo()` stub that always returned `INCONCLUSIVE`. Fail-closed
-  treats `INCONCLUSIVE` as a block, and a MUST can never be waived (AG-GOV-01), so
-  **no surface could reach Silver or Gold** — the rule blocked every scan at those
-  profiles. It now statically analyses the workflows: a secret echoed/printf'd to
-  the log (excluding `::add-mask::` and writes to `$GITHUB_ENV`/`$GITHUB_OUTPUT`)
-  fails, and any `${{ secrets.* }}` referenced inside a `pull_request_target`
-  workflow fails; `github.token` and secrets in trusted-event jobs are fine.
-  Surfaced by dogfooding the Gold scan against the standard's own site. (a
-  self-blocking gap in the standard, of the RUN-02/03 class)
+- **`AG-SUP-04` no longer false-positives on the analytics-host catalog.** The
+  runner's ~100-host tracker list tripped gitleaks' generic-api-key heuristic on a
+  hostname; a `.gitleaks.toml` allowlist scopes those generated files out. Repo
+  hygiene only — no change to the runner's verdicts.
 
 ## [1.5.1] — 2026-08-27
 
