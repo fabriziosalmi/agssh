@@ -299,6 +299,23 @@ def build():
     pdf_src = os.path.join(_here, PDF_NAME)
     if os.path.exists(pdf_src):
         shutil.copy2(pdf_src, os.path.join(_site, PDF_NAME))
+    # sitemap + robots. The site is one page and the standard's PDF, so this is a short
+    # file — but the PDF is the document people are meant to find, and nothing links to
+    # it from outside. Generated here, never hand-written, so it cannot drift from what
+    # build() actually wrote. agssh.dev owns its host root, so robots.txt is honoured.
+    pagine = ["", PDF_NAME] if os.path.exists(os.path.join(_site, PDF_NAME)) else [""]
+    loc = "\n".join('  <url><loc>https://agssh.dev/%s</loc></url>' % x for x in pagine)
+    with open(os.path.join(_site, "sitemap.xml"), "w") as f:
+        # The sitemap namespace is an IDENTIFIER, not a link: sitemaps.org defines it as
+        # http://, and a validator comparing the string rejects https://. VBC-034 reads it
+        # as an insecure link, which is the one case where it is not one.
+        # slopless-disable-next-line VBC-034
+        ns = "http://www.sitemaps.org/schemas/sitemap/0.9"
+        f.write('<?xml version="1.0" encoding="UTF-8"?>\n'
+                '<urlset xmlns="%s">\n' % ns
+                + loc + "\n</urlset>\n")
+    with open(os.path.join(_site, "robots.txt"), "w") as f:
+        f.write("User-agent: *\nAllow: /\n\nSitemap: https://agssh.dev/sitemap.xml\n")
     # A CNAME so GitHub Pages serves the apex domain.
     with open(os.path.join(_site, "CNAME"), "w") as f:
         f.write("agssh.dev\n")
