@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.8.0] — 2026-10-10
+
 ### Changed (verdict-affecting)
 
 - **The per-level obligations RULES.md documents are now enforced (#71).** Until now
