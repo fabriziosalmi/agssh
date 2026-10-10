@@ -1,5 +1,5 @@
 name: "AGSSH Conformance"
-description: "Deterministic, fail-closed conformance gate for air-gapped static surfaces (AGSSH-STD-001 v1.6.0)."
+description: "Deterministic, fail-closed conformance gate for air-gapped static surfaces (AGSSH-STD-001 v1.7.0)."
 author: "Fabrizio Salmi"
 branding:
   icon: "shield"
