@@ -43,7 +43,7 @@ outputs:
 
 runs:
   using: "docker"
-  image: "docker://ghcr.io/fabriziosalmi/agssh:1.6.0"
+  image: "docker://ghcr.io/fabriziosalmi/agssh:1.7.0"
   args:
     - "-config=${{ inputs.config }}"
     - "-profile=${{ inputs.profile }}"
