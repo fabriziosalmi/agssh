@@ -116,7 +116,8 @@ func Evaluate(cfg *manifest.Config, surface manifest.Surface, opts Options) *rep
 		}
 		cancel()
 		res := rules.Stamp(r, out)
-		if !rules.LevelInScope(r.ID, level) {
+		res.SetObligation(rules.EffectiveObligation(r, level))
+		if rules.ModeAt(r.ID, level) == rules.LevelOutOfScope {
 			// Out of scope at this level: the level does not DEMAND this rule. Keep
 			// it only if the surface passes it anyway — exceeding a stricter rule
 			// than the level requires is earned credit, never a penalty. A non-pass

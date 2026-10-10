@@ -86,31 +86,41 @@ func All() []Rule {
 	}
 }
 
-// ruleLevels declares which LEVELS a rule is in scope for, kept SEPARATE from a
-// rule's surface applicability (Applies). A rule absent from the map is in scope
-// at every level. Level-scope is distinct from surface-scope because the engine
-// treats them differently: a rule out of scope for the SURFACE is excluded
-// outright, whereas a rule out of scope only for the LEVEL is still evaluated and
-// kept as earned credit if the surface passes it — so exceeding a stricter level's
-// demand never lowers the score (see engine scoring; dogfooding finding RUN-06).
-var ruleLevels = map[string][]manifest.Level{
-	// AG-PRV-01 (zero telemetry) is required at the air-gapped levels; L2 (marketing)
-	// tolerates telemetry, so at L2 a surface that still has zero telemetry earns the
-	// point, and one that does not is excused rather than penalised.
-	"AG-PRV-01": {manifest.L0, manifest.L1},
+// LevelMode is how a rule behaves at one strictness level. The per-level table
+// (levelModes, levels_gen.go) is generated from the standard's `applies` strings,
+// kept SEPARATE from a rule's surface applicability (Applies): the engine treats
+// them differently — a rule out of scope for the SURFACE is excluded outright,
+// whereas a rule out of scope only for the LEVEL is still evaluated and kept as
+// earned credit if the surface passes it, so exceeding a stricter level's demand
+// never lowers the score (see engine scoring; dogfooding finding RUN-06).
+type LevelMode uint8
+
+const (
+	LevelRequired   LevelMode = iota // the rule's own obligation applies (default)
+	LevelAdvisory                    // downgraded to SHOULD: still failing, but governed-waivable
+	LevelOutOfScope                  // the level does not demand it: bonus if passed, excused if not
+	LevelForbidden                   // the rule's subject is banned here (required, stricter check)
+)
+
+// ModeAt returns the rule's mode at level l. A rule with no declared level
+// behaviour is required at every level.
+func ModeAt(id string, l manifest.Level) LevelMode {
+	if modes, ok := levelModes[id]; ok && int(l) >= 0 && int(l) < len(modes) {
+		return modes[l]
+	}
+	return LevelRequired
 }
 
-// LevelInScope reports whether rule id is required at level l. A rule with no
-// declared level-scope is in scope at every level.
+// LevelInScope reports whether rule id is demanded at level l.
 func LevelInScope(id string, l manifest.Level) bool {
-	levels, ok := ruleLevels[id]
-	if !ok {
-		return true
+	return ModeAt(id, l) != LevelOutOfScope
+}
+
+// EffectiveObligation is the rule's obligation at level l: a MUST that is only
+// advisory at l behaves as a SHOULD there (so a governed waiver may cover it).
+func EffectiveObligation(r Rule, l manifest.Level) Obligation {
+	if r.Obligation == Must && ModeAt(r.ID, l) == LevelAdvisory {
+		return Should
 	}
-	for _, x := range levels {
-		if x == l {
-			return true
-		}
-	}
-	return false
+	return r.Obligation
 }

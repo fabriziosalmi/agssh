@@ -7,283 +7,340 @@ rules:
     obligation: MUST
     severity: CRITICAL
     profile: Bronze
+    levels: {L0: required, L1: required, L2: required}
   - id: AG-NET-02
     family: AG-NET
     obligation: MUST
     severity: CRITICAL
     profile: Bronze
+    levels: {L0: required, L1: required, L2: required}
   - id: AG-NET-03
     family: AG-NET
     obligation: MUST
     severity: HIGH
     profile: Silver
+    levels: {L0: required, L1: required, L2: required}
   - id: AG-NET-04
     family: AG-NET
     obligation: MUST
     severity: CRITICAL
     profile: Bronze
+    levels: {L0: required, L1: required, L2: required}
   - id: AG-NET-05
     family: AG-NET
     obligation: MUST
     severity: HIGH
     profile: Silver
+    levels: {L0: required, L1: advisory, L2: out_of_scope}
   - id: AG-NET-06
     family: AG-NET
     obligation: MUST
     severity: MEDIUM
     profile: Silver
+    levels: {L0: required, L1: required, L2: advisory}
   - id: AG-NET-07
     family: AG-NET
     obligation: MUST
     severity: HIGH
     profile: Silver
+    levels: {L0: required, L1: required, L2: required}
   - id: AG-NET-08
     family: AG-NET
     obligation: MUST
     severity: MEDIUM
     profile: Silver
+    levels: {L0: required, L1: required, L2: out_of_scope}
   - id: AG-NET-09
     family: AG-NET
     obligation: MUST
     severity: MEDIUM
     profile: Bronze
+    levels: {L0: required, L1: required, L2: required}
   - id: AG-CSP-01
     family: AG-CSP
     obligation: MUST
     severity: HIGH
     profile: Bronze
+    levels: {L0: required, L1: required, L2: required}
   - id: AG-CSP-02
     family: AG-CSP
     obligation: MUST
     severity: HIGH
     profile: Bronze
+    levels: {L0: required, L1: required, L2: required}
   - id: AG-CSP-03
     family: AG-CSP
     obligation: MUST
     severity: HIGH
     profile: Bronze
+    levels: {L0: required, L1: required, L2: required}
   - id: AG-CSP-04
     family: AG-CSP
     obligation: SHOULD
     severity: MEDIUM
     profile: Silver
+    levels: {L0: required, L1: required, L2: required}
   - id: AG-CSP-05
     family: AG-CSP
     obligation: MUST
     severity: MEDIUM
     profile: Silver
+    levels: {L0: required, L1: required, L2: required}
   - id: AG-CSP-06
     family: AG-CSP
     obligation: MUST
     severity: HIGH
     profile: Silver
+    levels: {L0: required, L1: required, L2: advisory}
   - id: AG-HDR-01
     family: AG-HDR
     obligation: MUST
     severity: HIGH
     profile: Bronze
+    levels: {L0: required, L1: required, L2: required}
   - id: AG-HDR-01a
     family: AG-HDR
     obligation: MUST
     severity: HIGH
     profile: Silver
+    levels: {L0: required, L1: required, L2: required}
   - id: AG-HDR-02
     family: AG-HDR
     obligation: MUST
     severity: HIGH
     profile: Bronze
+    levels: {L0: required, L1: required, L2: required}
   - id: AG-HDR-03
     family: AG-HDR
     obligation: MUST
     severity: HIGH
     profile: Bronze
+    levels: {L0: required, L1: required, L2: required}
   - id: AG-HDR-04
     family: AG-HDR
     obligation: MUST
     severity: MEDIUM
     profile: Silver
+    levels: {L0: required, L1: required, L2: required}
   - id: AG-HDR-05
     family: AG-HDR
     obligation: MUST
     severity: MEDIUM
     profile: Silver
+    levels: {L0: required, L1: required, L2: required}
   - id: AG-HDR-06
     family: AG-HDR
     obligation: MUST
     severity: MEDIUM
     profile: Gold
+    levels: {L0: required, L1: required, L2: required}
   - id: AG-HDR-07
     family: AG-HDR
     obligation: SHOULD
     severity: LOW
     profile: Silver
+    levels: {L0: required, L1: required, L2: required}
   - id: AG-HDR-08
     family: AG-HDR
     obligation: MUST
     severity: HIGH
     profile: Silver
+    levels: {L0: required, L1: required, L2: required}
   - id: AG-DNS-01
     family: AG-DNS
     obligation: MUST
     severity: HIGH
     profile: Silver
+    levels: {L0: required, L1: required, L2: required}
   - id: AG-DNS-02
     family: AG-DNS
     obligation: SHOULD
     severity: MEDIUM
     profile: Silver
+    levels: {L0: required, L1: required, L2: required}
   - id: AG-DNS-03
     family: AG-DNS
     obligation: MUST
     severity: HIGH
     profile: Silver
+    levels: {L0: required, L1: required, L2: required}
   - id: AG-SUP-01
     family: AG-SUP
     obligation: MUST
     severity: HIGH
     profile: Silver
+    levels: {L0: required, L1: required, L2: required}
   - id: AG-SUP-02
     family: AG-SUP
     obligation: MUST
     severity: HIGH
     profile: Silver
+    levels: {L0: required, L1: required, L2: required}
   - id: AG-SUP-03
     family: AG-SUP
     obligation: SHOULD
     severity: MEDIUM
     profile: Silver
+    levels: {L0: required, L1: required, L2: required}
   - id: AG-SUP-04
     family: AG-SUP
     obligation: MUST
     severity: HIGH
     profile: Bronze
+    levels: {L0: required, L1: required, L2: required}
   - id: AG-SUP-05
     family: AG-SUP
     obligation: SHOULD
     severity: LOW
     profile: Silver
+    levels: {L0: required, L1: required, L2: required}
   - id: AG-SUP-06
     family: AG-SUP
     obligation: MUST
     severity: HIGH
     profile: Bronze
+    levels: {L0: required, L1: required, L2: required}
   - id: AG-SUP-07
     family: AG-SUP
     obligation: SHOULD
     severity: MEDIUM
     profile: Gold
+    levels: {L0: required, L1: required, L2: required}
   - id: AG-SUP-08
     family: AG-SUP
     obligation: SHOULD
     severity: MEDIUM
     profile: Gold
+    levels: {L0: required, L1: required, L2: required}
   - id: AG-CI-01
     family: AG-CI
     obligation: MUST
     severity: HIGH
     profile: Silver
+    levels: {L0: required, L1: required, L2: required}
   - id: AG-CI-02
     family: AG-CI
     obligation: MUST
     severity: HIGH
     profile: Silver
+    levels: {L0: required, L1: required, L2: required}
   - id: AG-CI-03
     family: AG-CI
     obligation: MUST
     severity: CRITICAL
     profile: Silver
+    levels: {L0: required, L1: required, L2: required}
   - id: AG-CI-04
     family: AG-CI
     obligation: MUST
     severity: HIGH
     profile: Silver
+    levels: {L0: required, L1: required, L2: required}
   - id: AG-CI-05
     family: AG-CI
     obligation: SHOULD
     severity: MEDIUM
     profile: Silver
+    levels: {L0: required, L1: required, L2: required}
   - id: AG-CI-06
     family: AG-CI
     obligation: SHOULD
     severity: MEDIUM
     profile: Gold
+    levels: {L0: required, L1: required, L2: required}
   - id: AG-PRV-01
     family: AG-PRV
     obligation: MUST
     severity: CRITICAL
     profile: Bronze
+    levels: {L0: required, L1: required, L2: out_of_scope}
   - id: AG-PRV-02
     family: AG-PRV
     obligation: MUST
     severity: CRITICAL
     profile: Bronze
+    levels: {L0: required, L1: required, L2: required}
   - id: AG-PRV-03
     family: AG-PRV
     obligation: MUST
     severity: HIGH
     profile: Bronze
+    levels: {L0: required, L1: required, L2: required}
   - id: AG-PRV-04
     family: AG-PRV
     obligation: MUST
     severity: MEDIUM
     profile: Silver
+    levels: {L0: required, L1: required, L2: advisory}
   - id: AG-PRV-05
     family: AG-PRV
     obligation: MUST
     severity: HIGH
     profile: Silver
+    levels: {L0: required, L1: required, L2: required}
   - id: AG-PRV-06
     family: AG-PRV
     obligation: MUST
     severity: MEDIUM
     profile: Silver
+    levels: {L0: forbidden, L1: forbidden, L2: required}
   - id: AG-OUT-01
     family: AG-OUT
     obligation: MUST
     severity: MEDIUM
     profile: Silver
+    levels: {L0: required, L1: required, L2: required}
   - id: AG-OUT-02
     family: AG-OUT
     obligation: SHOULD
     severity: LOW
     profile: Gold
+    levels: {L0: required, L1: required, L2: required}
   - id: AG-OUT-03
     family: AG-OUT
     obligation: MUST
     severity: CRITICAL
     profile: Bronze
+    levels: {L0: required, L1: required, L2: required}
   - id: AG-GOV-01
     family: AG-GOV
     obligation: MUST
     severity: CRITICAL
     profile: Bronze
+    levels: {L0: required, L1: required, L2: required}
   - id: AG-GOV-02
     family: AG-GOV
     obligation: MUST
     severity: HIGH
     profile: Silver
+    levels: {L0: required, L1: required, L2: required}
   - id: AG-GOV-03
     family: AG-GOV
     obligation: MUST
     severity: HIGH
     profile: Silver
+    levels: {L0: required, L1: required, L2: required}
   - id: AG-GOV-04
     family: AG-GOV
     obligation: MUST
     severity: HIGH
     profile: Gold
+    levels: {L0: required, L1: required, L2: required}
   - id: AG-GOV-05
     family: AG-GOV
     obligation: MUST
     severity: HIGH
     profile: Gold
+    levels: {L0: required, L1: required, L2: required}
   - id: AG-GOV-06
     family: AG-GOV
     obligation: MUST
     severity: HIGH
     profile: Silver
+    levels: {L0: required, L1: required, L2: out_of_scope}
   - id: AG-GOV-07
     family: AG-GOV
     obligation: MUST
     severity: HIGH
     profile: Gold
+    levels: {L0: required, L1: required, L2: required}

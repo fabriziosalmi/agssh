@@ -123,6 +123,10 @@ func (r Result) Ob() Obligation      { return r.ob }
 func (r *Result) SetWaived(b bool)   { r.Waived = b }
 func (r *Result) SetStatus(s Status) { r.raw = s; r.Status = s.String() }
 
+// SetObligation records the obligation in force at the evaluated level (a MUST
+// that is advisory at this level is reported, and waivable, as a SHOULD).
+func (r *Result) SetObligation(o Obligation) { r.ob = o; r.Obligation = o.String() }
+
 // Stamp builds a fully-populated Result from a Rule and a checker Outcome.
 func Stamp(r Rule, o Outcome) Result {
 	return Result{

@@ -6,6 +6,27 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (verdict-affecting)
+
+- **The per-level obligations RULES.md documents are now enforced (#71).** Until now
+  the runner honoured level scope for AG-PRV-01 alone; every other `SHOULD · Lx` /
+  "not listed at Lx" / "forbidden · Lx" note in the standard was documentation. The
+  per-level behaviour is now derived from each rule's `applies` string by
+  `standard/build_pdf.py` into `internal/rules/levels_gen.go` (and a `levels:` field in
+  `manifest.yaml`, checked by a skew test), so spec and runner cannot drift:
+  - **Out of scope** (kept as bonus credit if passed, excused if not — RUN-06
+    monotonic scoring): AG-NET-05 at L2; AG-NET-08 and AG-GOV-06 at L2.
+  - **Advisory** (reported as `SHOULD`: still failing and scored, but covered by a
+    governed waiver): AG-NET-05 at L1; AG-NET-06, AG-CSP-06, AG-PRV-04 at L2.
+  - **Forbidden**: AG-PRV-06 fails any cross-origin iframe at L0/L1, sandboxed or not;
+    at L2 it demands the sandbox as before.
+  - A waiver is judged against the obligation in force **at the evaluated level**
+    (AG-GOV-01): AG-CSP-06 is waivable at L2, still a non-waivable MUST at L0/L1.
+  - Effect: L1/L2 surfaces stop being penalised for rules the standard does not demand
+    at their level; badge percentages for L1/L2 surfaces can rise. L0 is unchanged.
+  - AG-PRV-02's wording is now `MUST · L0 L1 L2 (decisive at L2)` (it was always
+    evaluated at every level).
+
 ### Fixed
 
 - **AG-NET-05 now honours the declared egress allow-list.** Hosts in

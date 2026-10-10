@@ -480,3 +480,50 @@ func TestLevelInScope(t *testing.T) {
 		t.Error("a rule with no declared level-scope must be in scope at every level")
 	}
 }
+
+// A rule that is only advisory at a level (SHOULD · Lx in the standard) is waivable
+// at that level and only there: AG-CSP-06 is MUST at L0/L1 but SHOULD at L2 (#71).
+func TestGovernanceWaiverFollowsLevelObligation(t *testing.T) {
+	now := time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC)
+	idx := ruleIndex()
+	cfg := func(level string) *manifest.Config {
+		return &manifest.Config{Level: level, Deviations: []manifest.Deviation{{Rule: "AG-CSP-06", Expires: "2026-06-20"}}}
+	}
+	if _, active, _, viol := governance(cfg("L2"), manifest.Silver, idx, now, nil, ""); !active["AG-CSP-06"] || len(viol) != 0 {
+		t.Errorf("AG-CSP-06 at L2 is advisory: waiver must be active (active=%v viol=%v)", active["AG-CSP-06"], viol)
+	}
+	for _, lvl := range []string{"L0", "L1"} {
+		if _, active, _, viol := governance(cfg(lvl), manifest.Silver, idx, now, nil, ""); active["AG-CSP-06"] || len(viol) == 0 {
+			t.Errorf("AG-CSP-06 at %s is a MUST: waiver must be rejected (AG-GOV-01)", lvl)
+		}
+	}
+}
+
+// The record reports the obligation in force at the evaluated level, and excuses a
+// failing out-of-scope rule while keeping an advisory one as a (waivable) failure.
+func TestRecordReflectsLevelModes(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`<!doctype html><html><head><title>t</title></head><body>hi</body></html>`))
+	}))
+	defer srv.Close()
+	eval := func(level string) map[string]rules.Result {
+		surf := manifest.Surface{URL: srv.URL, Kind: "site", Stateless: true}
+		cfg := &manifest.Config{TargetProfile: "Silver", Level: level, Surfaces: []manifest.Surface{surf}}
+		rec := Evaluate(cfg, surf, Options{HTTP: httpx.New(3 * time.Second), Now: time.Now(), PerCheck: 3 * time.Second})
+		m := map[string]rules.Result{}
+		for _, r := range rec.Results {
+			m[r.RuleID] = r
+		}
+		return m
+	}
+	l0, l2 := eval("L0"), eval("L2")
+	if r, ok := l0["AG-CSP-06"]; !ok || r.Obligation != "MUST" || r.Status != "FAIL" {
+		t.Errorf("L0 AG-CSP-06: %+v, want a MUST FAIL", r)
+	}
+	if r, ok := l2["AG-CSP-06"]; !ok || r.Obligation != "SHOULD" || r.Status != "FAIL" {
+		t.Errorf("L2 AG-CSP-06: %+v, want a SHOULD FAIL (advisory, still scored)", r)
+	}
+	if _, ok := l2["AG-NET-08"]; !ok {
+		t.Error("L2 AG-NET-08 passes on this surface: must be kept as bonus credit")
+	}
+}

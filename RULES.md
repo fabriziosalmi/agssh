@@ -112,7 +112,7 @@ tested against is [`internal/rules/manifest.yaml`](./internal/rules/manifest.yam
 | Rule | Requirement | Oblig. | Severity | Profile | Levels |
 |------|-------------|:------:|:--------:|:------:|:------:|
 | `AG-PRV-01` | Zero telemetry on air-gapped surfaces | MUST | CRITICAL | Bronze | L0 L1 (privacy tools) |
-| `AG-PRV-02` | Prior blocking of non-essential third parties | MUST | CRITICAL | Bronze | L2 (and anywhere a tracker exists) |
+| `AG-PRV-02` | Prior blocking of non-essential third parties | MUST | CRITICAL | Bronze | L0 L1 L2 (decisive at L2) |
 | `AG-PRV-03` | Self-host fonts | MUST | HIGH | Bronze | L0 L1 L2 |
 | `AG-PRV-04` | Minimize storage & fingerprinting | MUST | MEDIUM | Silver | L0 L1   (SHOULD · L2) |
 | `AG-PRV-05` | Cookie attributes where cookies exist | MUST | HIGH | Silver | when any cookie is set |

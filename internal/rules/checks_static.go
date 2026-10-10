@@ -810,7 +810,13 @@ func chkEmbedsSandboxed(_ context.Context, c *CheckCtx) Outcome {
 	if c.Doc == nil {
 		return inconclusive("surface not fetched")
 	}
+	forbidden := ModeAt("AG-PRV-06", c.Level) == LevelForbidden
 	for _, e := range collectEls(c.Doc.Body, "iframe") {
+		// Below L2 a third-party embed is not merely "to be sandboxed": it is banned.
+		if forbidden && isExternal(c.Doc.FinalURL, e.attr["src"]) {
+			return bad("third-party iframe at "+c.Level.String()+": "+e.attr["src"],
+				"no third-party embeds at L0/L1 (sandboxing is not enough); self-host it or declare the surface L2")
+		}
 		if _, ok := e.attr["sandbox"]; !ok {
 			return bad("iframe without sandbox: "+e.attr["src"], "every iframe carries a sandbox attribute")
 		}

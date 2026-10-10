@@ -19,6 +19,7 @@ func governance(cfg *manifest.Config, profile manifest.Profile, byID map[string]
 	now time.Time, approvers map[string]bool, author string) (gov []rules.Result, active map[string]bool, recs []report.WaiverRec, violations []string) {
 
 	active = map[string]bool{}
+	level, _ := cfg.LevelV() // an invalid level is rejected by the caller; default L0 is strictest
 	budget := cfg.Waivers.Budget
 	maxWindow := budget.MaxWindowDays
 	if maxWindow <= 0 {
@@ -37,8 +38,10 @@ func governance(cfg *manifest.Config, profile manifest.Profile, byID map[string]
 			recs = append(recs, rec)
 			continue
 		}
-		// AG-GOV-01 — a MUST can never be waived.
-		if rule.Obligation == rules.Must {
+		// AG-GOV-01 — a MUST can never be waived. "MUST" is the obligation IN FORCE at
+		// the evaluated level: a rule that is only advisory here (SHOULD · Lx in the
+		// standard) is waivable at that level, and only there.
+		if rules.EffectiveObligation(rule, level) == rules.Must {
 			rec.Valid, rec.Note = false, "MUST is non-waivable"
 			v01 = append(v01, "waiver attempts to cover MUST "+dev.Rule)
 			recs = append(recs, rec)
