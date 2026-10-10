@@ -806,9 +806,9 @@ _md_lines = [
     "# AGSSH-STD-001 — Rule reference\n\n",
     "**%s** · %d rules · %d families · cumulative profiles **Bronze ⊂ Silver ⊂ Gold**.\n\n" % (DOC_VER, n_rules, n_fam),
     "This is the browsable index. The full normative text — *why · check · fix · tool* for every rule —\n"
-    "is the [rendered standard](standard/AGSSH-STD-001-%s.pdf); the machine-readable form the runner is\n"
-    "tested against is [`internal/rules/manifest.yaml`](internal/rules/manifest.yaml). See the\n"
-    "[README](README.md) to run the gate.\n\n" % DOC_VER,
+    "is the [rendered standard](./standard/AGSSH-STD-001-%s.pdf); the machine-readable form the runner is\n"
+    "tested against is [`internal/rules/manifest.yaml`](./internal/rules/manifest.yaml). See the\n"
+    "[README](./README.md) to run the gate.\n\n" % DOC_VER,
     "**How to read.** *Obligation* — **MUST** blocks the gate, **SHOULD** is governed-waivable. "
     "*Severity* weights the score and orders the fix queue (Critical 8 · High 4 · Medium 2 · Low 1). "
     "*Profile* is the lowest cumulative tier that includes the rule (Gold ⊇ Silver ⊇ Bronze). "

@@ -4,9 +4,9 @@
 **v1.7.0** · 57 rules · 9 families · cumulative profiles **Bronze ⊂ Silver ⊂ Gold**.
 
 This is the browsable index. The full normative text — *why · check · fix · tool* for every rule —
-is the [rendered standard](standard/AGSSH-STD-001-v1.7.0.pdf); the machine-readable form the runner is
-tested against is [`internal/rules/manifest.yaml`](internal/rules/manifest.yaml). See the
-[README](README.md) to run the gate.
+is the [rendered standard](./standard/AGSSH-STD-001-v1.7.0.pdf); the machine-readable form the runner is
+tested against is [`internal/rules/manifest.yaml`](./internal/rules/manifest.yaml). See the
+[README](./README.md) to run the gate.
 
 **How to read.** *Obligation* — **MUST** blocks the gate, **SHOULD** is governed-waivable. *Severity* weights the score and orders the fix queue (Critical 8 · High 4 · Medium 2 · Low 1). *Profile* is the lowest cumulative tier that includes the rule (Gold ⊇ Silver ⊇ Bronze). *Levels* are the strictness bands it applies at — **L0** strict air-gap · **L1** scoped egress · **L2** marketing.
 

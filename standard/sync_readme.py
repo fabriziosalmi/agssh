@@ -44,7 +44,7 @@ if not os.path.exists(os.path.join(_root, "standard", PDF)):
 # Marker-delimited spans: {relpath: {marker name: (expected count, content)}}.
 SPANS = {
     "README.md": {
-        "std-headline": (1, "[`standard/%s`](standard/%s) — %d rules across %d families"
+        "std-headline": (1, "[`standard/%s`](./standard/%s) — %d rules across %d families"
                          % (PDF, PDF, bp.n_rules, bp.n_fam)),
         "n-rules": (1, str(bp.n_rules)),
     },

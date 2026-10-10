@@ -73,7 +73,7 @@ Four ways in (CLI, Action, container, MCP), one idea: **nothing is green unless 
 
 ## The standard
 
-<!-- agssh:std-headline -->[`standard/AGSSH-STD-001-v1.7.0.pdf`](standard/AGSSH-STD-001-v1.7.0.pdf) — 57 rules across 9 families<!-- /agssh:std-headline -->,
+<!-- agssh:std-headline -->[`standard/AGSSH-STD-001-v1.7.0.pdf`](./standard/AGSSH-STD-001-v1.7.0.pdf) — 57 rules across 9 families<!-- /agssh:std-headline -->,
 browsable as [**`RULES.md`**](RULES.md). The rules live as structured data in
 [`standard/build_pdf.py`](standard/build_pdf.py), which emits the PDF, `RULES.md`,
 **and** the runner's rule manifest from one source — so the document and the runner
