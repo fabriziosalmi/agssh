@@ -9,20 +9,19 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"golang.org/x/net/publicsuffix"
 
 	"github.com/fabriziosalmi/agssh/internal/engine"
 	"github.com/fabriziosalmi/agssh/internal/httpx"
 	"github.com/fabriziosalmi/agssh/internal/manifest"
 	"github.com/fabriziosalmi/agssh/internal/report"
 	"github.com/fabriziosalmi/agssh/internal/rules"
+	"github.com/fabriziosalmi/agssh/internal/target"
 )
 
 const defaultTimeout = 45 * time.Second
@@ -102,13 +101,13 @@ type ScanInput struct {
 func handleScan(ctx context.Context, _ *mcp.CallToolRequest, in ScanInput) (res *mcp.CallToolResult, out ScanResult, err error) {
 	defer recoverToError(&err)
 
-	surfURL, e := normalizeURL(in.URL)
+	surfURL, e := target.NormalizeURL(in.URL)
 	if e != nil {
 		return nil, ScanResult{}, e
 	}
 	zone := strings.TrimSpace(in.Zone)
 	if zone == "" {
-		zone = registrableDomain(surfURL)
+		zone = target.RegistrableDomain(surfURL)
 	}
 
 	cfg := &manifest.Config{
@@ -446,49 +445,6 @@ func validateConfig(cfg *manifest.Config) error {
 	// Reject wildcard allow-lists: an untrusted caller must not be able to pass
 	// allow_connect=["*"] (etc.) and disable the very check it scopes.
 	return manifest.ValidateAllow(cfg.Allow)
-}
-
-// normalizeURL requires an absolute http(s) URL with a host. A bare host such as
-// "example.org" is upgraded to https://example.org so a caller need not remember
-// the scheme; anything with an explicit non-http scheme is rejected.
-func normalizeURL(raw string) (string, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return "", fmt.Errorf("url is required")
-	}
-	if !strings.Contains(raw, "://") {
-		raw = "https://" + raw
-	}
-	u, err := url.Parse(raw)
-	if err != nil {
-		return "", fmt.Errorf("invalid url %q: %w", raw, err)
-	}
-	if u.Scheme != "http" && u.Scheme != "https" {
-		return "", fmt.Errorf("url scheme must be http or https, got %q", u.Scheme)
-	}
-	if u.Host == "" {
-		return "", fmt.Errorf("url %q has no host", raw)
-	}
-	return u.String(), nil
-}
-
-// registrableDomain derives the eTLD+1 (the DNS zone) from a surface URL's host,
-// stripping the port. Returns "" when the host is an IP or otherwise has no
-// registrable domain, in which case the DNS-plane checks stay inconclusive.
-func registrableDomain(surfURL string) string {
-	u, err := url.Parse(surfURL)
-	if err != nil {
-		return ""
-	}
-	host := u.Hostname()
-	if host == "" {
-		return ""
-	}
-	etld1, err := publicsuffix.EffectiveTLDPlusOne(host)
-	if err != nil {
-		return ""
-	}
-	return etld1
 }
 
 // absentSourceRoot returns an absolute path whose final component does not

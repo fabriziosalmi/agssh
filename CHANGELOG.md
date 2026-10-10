@@ -6,6 +6,27 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **`agssh scan <url>...`** — config-free CLI scan. Synthesizes the manifest from
+  flags (`-profile -level -kind -stateless -allow-connect -allow-subresource
+  -allow-embed -allow-storage -path -zone -resolver -timeout`), accepts several URLs
+  with flags and URLs interleaved, prints the human summary (or `-json` on stdout,
+  summary on stderr), and keeps the runner's exit codes (0/1/2/3). Source-plane rules
+  stay INCONCLUSIVE unless `-repo/-dist/-workflows` are given, never scanning the
+  current directory by accident. Parity with the MCP `agssh_scan` tool.
+- **Homebrew tap** — `brew install fabriziosalmi/agssh/agssh` (formula published by
+  goreleaser to `fabriziosalmi/homebrew-agssh`; installs `agssh` and `agssh-mcp`).
+  The upload skips itself until the `HOMEBREW_TAP_TOKEN` secret exists.
+- **Scheduled regression watch** — `examples/watch.yml` + `examples/watch-targets.json`.
+
+### Changed
+
+- URL normalization and zone derivation moved to `internal/target`, shared by the
+  CLI and the MCP server (no behaviour change).
+- CI `goreleaser check` tolerates only the soft `brews` deprecation; any other
+  configuration error still fails it.
+
 ## [1.6.0] — 2026-08-28
 
 ### Added

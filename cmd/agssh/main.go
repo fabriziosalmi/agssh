@@ -3,6 +3,9 @@
 // applies governed waivers, and emits a signed conformance record. Exit codes:
 // 0 = conformant, 1 = non-conformant, 2 = usage/internal error, 3 = a surface
 // was unscannable (its live deployment could not be fetched).
+//
+// Two entry points: `agssh scan <url>` synthesizes a manifest from flags (no
+// config file); `agssh -config .airgap.yml` evaluates a declared manifest.
 package main
 
 import (
@@ -30,6 +33,12 @@ var (
 )
 
 func main() {
+	// `agssh scan <url>` is the config-free path; everything else keeps the
+	// original flag-driven, manifest-based behaviour untouched.
+	if len(os.Args) > 1 && os.Args[1] == "scan" {
+		os.Exit(runScan(os.Args[2:]))
+	}
+
 	cfgPath := flag.String("config", ".airgap.yml", "path to .airgap.yml")
 	repo := flag.String("repo", ".", "repository root for static repo checks")
 	dist := flag.String("dist", "dist", "built artifact directory (secrets / source-maps / SBOM)")

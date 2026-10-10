@@ -1,0 +1,4 @@
+[
+  { "url": "https://example.com/", "profile": "Silver", "level": "L2", "min_score": 60 },
+  { "url": "https://docs.example.com/", "profile": "Bronze", "level": "L0", "min_score": 90 }
+]

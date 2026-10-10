@@ -1,0 +1,70 @@
+# .github/workflows/agssh-watch.yml — scheduled regression watch.
+#
+# Scans every surface in .github/agssh-watch.json (see examples/watch-targets.json)
+# on a schedule and opens (or updates) ONE issue when a surface drops below its
+# `min_score` or can no longer be fetched. Closes it again when everything is back
+# above its floor. Uses the same prebuilt image as the Action (Chromium + cosign
+# inside), so the dynamic plane runs too.
+#
+# `min_score` is a ratchet, not the conformance gate: a surface that is still
+# NON-CONFORMANT can be tracked and only alerts when it gets WORSE. Raise the floor
+# as you fix things.
+name: agssh-watch
+
+on:
+  schedule:
+    - cron: "17 6 * * *"      # daily, off the hour
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: scan every target
+        id: scan
+        run: |
+          set -u
+          export LC_ALL=C            # '.' decimal separator for printf/awk on any runner
+          : > findings.md
+          regress=0
+          n=$(jq length .github/agssh-watch.json)
+          for i in $(seq 0 $((n-1))); do
+            url=$(jq -r ".[$i].url" .github/agssh-watch.json)
+            profile=$(jq -r ".[$i].profile // \"Bronze\"" .github/agssh-watch.json)
+            level=$(jq -r ".[$i].level // \"L0\"" .github/agssh-watch.json)
+            floor=$(jq -r ".[$i].min_score // 0" .github/agssh-watch.json)
+            # exit 1 (non-conformant) is expected here; exit 3 (unscannable) is a finding.
+            docker run --rm ghcr.io/fabriziosalmi/agssh:1 scan -json \
+              -profile "$profile" -level "$level" "$url" > "rec-$i.json" 2> "log-$i.txt" || true
+            pct=$(jq -r 'select(.unscannable != true) | .score.pct // empty' "rec-$i.json" 2>/dev/null || true)
+            if [ -z "$pct" ]; then
+              why=$(jq -r '.unreachable_reason // empty' "rec-$i.json" 2>/dev/null || true)
+              echo "- **$url** — could not be scanned (${why:-runner error})" >> findings.md
+              regress=1
+            elif awk "BEGIN{exit !($pct < $floor)}"; then
+              printf -- '- **%s** — score %.1f%% is below its floor of %s%% (%s/%s)\n' \
+                "$url" "$pct" "$floor" "$profile" "$level" >> findings.md
+              jq -r '.fix_queue[:5][] | "    - \(.severity) \(.rule): \(.observed)"' "rec-$i.json" >> findings.md
+              regress=1
+            fi
+          done
+          echo "regress=$regress" >> "$GITHUB_OUTPUT"
+      - name: open / update / close the watch issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REGRESS: ${{ steps.scan.outputs.regress }}
+        run: |
+          title="agssh watch: conformance regression"
+          existing=$(gh issue list --state open --search "\"$title\" in:title" --json number --jq '.[0].number // empty')
+          if [ "$REGRESS" = "1" ]; then
+            body="Scheduled agssh scan ($(date -u +%F)) found regressions:"$'\n\n'"$(cat findings.md)"$'\n\n'"Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            if [ -n "$existing" ]; then gh issue comment "$existing" --body "$body"
+            else gh issue create --title "$title" --body "$body"; fi
+          elif [ -n "$existing" ]; then
+            gh issue close "$existing" --comment "All watched surfaces are back above their floor ($(date -u +%F))."
+          fi

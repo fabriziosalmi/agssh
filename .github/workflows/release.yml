@@ -26,6 +26,9 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Optional: without this secret the Homebrew formula step skips itself
+          # (skip_upload in .goreleaser.yaml) instead of failing the release.
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
 
   image:
     # Publishes ghcr.io/<owner>/agssh so the Action can run from a prebuilt image

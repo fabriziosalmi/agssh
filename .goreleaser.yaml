@@ -57,6 +57,39 @@ changelog:
       - "^ci:"
       - "^chore:"
 
+# Homebrew tap (fabriziosalmi/homebrew-agssh). Same pattern as flareover: to
+# publish the formula, add a repo-scoped PAT as the HOMEBREW_TAP_TOKEN secret.
+# Until that secret exists the step skips itself (skip_upload), so a release
+# never fails for it.
+brews:
+  - name: agssh
+    repository:
+      owner: fabriziosalmi
+      name: homebrew-agssh
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Formula
+    homepage: "https://agssh.dev"
+    description: "Deterministic, fail-closed conformance runner for air-gapped static surfaces (AGSSH-STD-001)"
+    license: "Apache-2.0"
+    skip_upload: '{{ if .Env.HOMEBREW_TAP_TOKEN }}false{{ else }}true{{ end }}'
+    commit_author:
+      name: goreleaser-bot
+      email: bot@agssh.dev
+    install: |
+      bin.install "agssh"
+      bin.install "agssh-mcp"
+    caveats: |
+      Dynamic checks (pre-consent egress, offline proof, egress canary) need a
+      headless Chrome/Chromium: install one and, if it is not on the default path,
+      export AGSSH_CHROME=/path/to/chrome. Without it those rules report
+      INCONCLUSIVE (fail-closed), never a silent pass.
+      Gold-profile signing needs cosign:  brew install cosign
+      Try it:  agssh scan https://example.com
+      Agents:  claude mcp add agssh -- agssh-mcp
+    test: |
+      system "#{bin}/agssh", "-version"
+
 release:
   draft: false
   prerelease: auto
