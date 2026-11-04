@@ -37,6 +37,17 @@ jobs:
       - name: hand-written docs must match the generator (count + version)
         run: python3 standard/sync_readme.py --check
 
+  image:
+    # The Action runs the published image (action.yml: image: docker://...), so
+    # build it from this tree and check the image itself, not only the code.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: build the image
+        run: docker build -t agssh:ci .
+      - name: check the image
+        run: .github/scripts/image-check.sh agssh:ci
+
   goreleaser-check:
     runs-on: ubuntu-latest
     steps:
