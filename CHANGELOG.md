@@ -6,6 +6,24 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **The Docker image verifies TLS certificates.** The runtime base
+  (`chromedp/headless-shell`) ships no CA bundle, so the published image could not
+  verify any certificate: every `https://` surface came back `UNSCANNABLE` (exit 3,
+  `x509: certificate signed by unknown authority`), including through the GitHub
+  Action, which runs that image. The Dockerfile now copies the Debian CA bundle from
+  the build stage to `/etc/ssl/certs/ca-certificates.crt`. A new `image` CI job
+  builds the image on every PR and runs `.github/scripts/image-check.sh`, which
+  scans an `https://` URL without mounting host certificates.
+- **The Docker image reports its version.** `agssh -version` in the published image
+  printed `agssh dev (commit none, built unknown)`: goreleaser stamps
+  `main.version/commit/date` into the archives, but the image builds its own binary
+  and nothing passed them. The Dockerfile now takes `VERSION`, `COMMIT` and `DATE`
+  build args (defaults `dev`, `none`, `unknown`, as a plain `go build`), release.yml
+  passes the tag, the commit SHA and the build time, and the CI image check asserts
+  the version it built with.
+
 ## [1.8.0] — 2026-10-10
 
 ### Changed (verdict-affecting)
