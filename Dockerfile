@@ -6,7 +6,16 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /agssh ./cmd/agssh
+# Build metadata, stamped into main.version/commit/date exactly as goreleaser
+# does for the release archives. release.yml passes the tag, the commit SHA and
+# the build time; a local `docker build` keeps the same defaults as `go build`.
+# Declared after the module download, so a new version keeps that layer cached.
+ARG VERSION=dev
+ARG COMMIT=none
+ARG DATE=unknown
+RUN CGO_ENABLED=0 go build -trimpath \
+      -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}" \
+      -o /agssh ./cmd/agssh
 
 # ---- cosign for the signed attestation (AG-GOV-05) ----
 FROM gcr.io/projectsigstore/cosign:v2.4.1 AS cosign

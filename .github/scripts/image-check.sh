@@ -3,11 +3,21 @@
 # belong to the image and not to the code. ci.yml runs it on every PR against
 # the image it just built; it runs the same way by hand:
 #
-#   docker build -t agssh:local . && .github/scripts/image-check.sh agssh:local
+#   docker build -t agssh:local --build-arg VERSION=0.0.0-local . &&
+#     .github/scripts/image-check.sh agssh:local 0.0.0-local
 set -uo pipefail
-img="${1:?usage: image-check.sh IMAGE}"
+img="${1:?usage: image-check.sh IMAGE VERSION}"
+want="${2:?usage: image-check.sh IMAGE VERSION}"
 target="${TARGET:-https://agssh.dev/}"
 fail=0
+
+# Version: the image must report the version it was built with (the VERSION
+# build arg), not the `dev` default of an unstamped binary.
+ver=$(docker run --rm "$img" -version 2>&1)
+case "$ver" in
+  "agssh $want "*) echo "ok: $ver" ;;
+  *) echo "::error::$img reports '$ver', want version $want"; fail=1 ;;
+esac
 
 # TLS: the image must verify public certificates with its own CA bundle, with
 # nothing mounted from the host. Exit 0 (conformant) and 1 (non-conformant) both

@@ -43,10 +43,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - name: build the image
-        run: docker build -t agssh:ci .
+      - name: build the image (with build metadata, as release.yml does)
+        run: |
+          docker build -t agssh:ci \
+            --build-arg VERSION=0.0.0-ci \
+            --build-arg COMMIT="$GITHUB_SHA" \
+            --build-arg DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" .
       - name: check the image
-        run: .github/scripts/image-check.sh agssh:ci
+        run: .github/scripts/image-check.sh agssh:ci 0.0.0-ci
 
   goreleaser-check:
     runs-on: ubuntu-latest
