@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.8.1] - 2026-11-04
+
 ### Fixed
 
 - **The Docker image verifies TLS certificates.** The runtime base
