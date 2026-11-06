@@ -46,7 +46,7 @@ def parse_rules():
     for line in md.splitlines():
         # The family heading separator is an em dash today; accept a colon or a
         # hyphen too, so a punctuation change in the generator cannot empty the site.
-        h = re.match(r"^## §\S+\s+(AG-[A-Z]+)\s+(?:—|:|-)\s+(.+?)\s*$", line)
+        h = re.match(r"^## §\S+\s+(AG-[A-Z]+)\s*(?:—|:|-)\s+(.+?)\s*$", line)
         if h:
             cur = (h.group(1), h.group(2), [])
             fams.append(cur)
