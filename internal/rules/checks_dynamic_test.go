@@ -40,6 +40,36 @@ func TestOfflineProofVerdictAllowList(t *testing.T) {
 	}
 }
 
+// TestOfflineProofNonNetworkSchemes pins issue #17's second half through the real
+// event path: data:, blob: and about: responses carry no host and are not
+// counted as third-party, while a genuine third-party origin still fails.
+func TestOfflineProofNonNetworkSchemes(t *testing.T) {
+	respond := func(o *netObs, u string) {
+		o.on(&network.EventResponseReceived{Response: &network.Response{URL: u}})
+	}
+	local := []string{
+		"http://me.test/",
+		"data:image/gif;base64,R0lGODlhAQABAAAAACw=",
+		"data:text/plain,hello",
+		"data:text/css,body{color:red}",
+		"data:,x",
+		"blob:http://me.test/7d3c1f0e-uuid",
+		"about:blank",
+	}
+	obs := newObs()
+	for _, u := range local {
+		respond(obs, u)
+	}
+	if out := offlineProofVerdict("me.test", obs.respondedHosts(), nil); out.Status != Pass {
+		t.Errorf("first-party plus data:/blob:/about: responses: got %s (%q), want PASS", out.Status, out.Evidence.Observed)
+	}
+	respond(obs, "https://evil.test/x.js")
+	out := offlineProofVerdict("me.test", obs.respondedHosts(), nil)
+	if out.Status != Fail || out.Evidence.Observed != "third-party responses from: evil.test" {
+		t.Errorf("plus a third-party origin: want FAIL naming only evil.test, got %s / %q", out.Status, out.Evidence.Observed)
+	}
+}
+
 func TestEgressAllowedLevelGating(t *testing.T) {
 	c := &CheckCtx{Allow: manifest.Allow{
 		Connect: []string{"https://api.me.test"}, Subresources: []string{"cdn.me.test"}, Embeds: []string{"https://yt.test/x"},
