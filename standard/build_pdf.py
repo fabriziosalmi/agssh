@@ -8,7 +8,7 @@ _here = os.path.dirname(os.path.abspath(__file__))
 
 def _release_from_changelog():
     # DOC_VER/DOC_DATE derive from the newest dated release heading of
-    # CHANGELOG.md — the project version has a single source, never a hand copy.
+    # CHANGELOG.md: the project version has a single source, never a hand copy.
     # Fail closed: an unreadable file or a malformed heading aborts the build.
     path = os.path.join(_here, "..", "CHANGELOG.md")
     try:
@@ -22,7 +22,7 @@ def _release_from_changelog():
         m = re.fullmatch(r"## \[(\d+\.\d+\.\d+)\]\s*[—–-]\s*(\d{4})-(\d{2})-(\d{2})\s*", ln)
         if not m:
             raise SystemExit("build_pdf: unparseable release heading in CHANGELOG.md: %r "
-                             "(expected '## [X.Y.Z] — YYYY-MM-DD')" % ln)
+                             "(expected '## [X.Y.Z] - YYYY-MM-DD')" % ln)
         try:
             day = datetime.date(int(m.group(2)), int(m.group(3)), int(m.group(4)))
         except ValueError:
@@ -71,8 +71,8 @@ RULES = [
  ("§2","Egress &amp; Air-Gap","AG-NET",[
   dict(id="AG-NET-01",title="Self-host every runtime dependency",sev="CRITICAL",
    applies="MUST · L0 L1 L2",ct="static+dynamic",
-   why="The third-party egress set of a surface is the UNION of every host it can reach: all CSP fetch-directive sources (script/style/img/font/media/connect/worker/frame/manifest/prefetch-src) plus every runtime sink (fetch, XHR, sendBeacon, EventSource, WebSocket, new Worker, importScripts, WebAssembly.instantiate*, dynamic import). For L0 that set MUST be a subset of {self}. The canonical breach is a browser OCR/codec engine fetched from a CDN on use — the document stays local, the engine does not.",
-   check="egress = union(all CSP fetch-dir hosts, all runtime request hosts)\nassert egress ⊆ {self}      # not connect-src alone — the whole set",
+   why="The third-party egress set of a surface is the UNION of every host it can reach: all CSP fetch-directive sources (script/style/img/font/media/connect/worker/frame/manifest/prefetch-src) plus every runtime sink (fetch, XHR, sendBeacon, EventSource, WebSocket, new Worker, importScripts, WebAssembly.instantiate*, dynamic import). For L0 that set MUST be a subset of {self}. The canonical breach is a browser OCR/codec engine fetched from a CDN on use; the document stays local, the engine does not.",
+   check="egress = union(all CSP fetch-dir hosts, all runtime request hosts)\nassert egress ⊆ {self}      # not connect-src alone, the whole set",
    fix="Vendor all assets same-origin; ship the .wasm, workers and data packs from your own origin.",
    tool="chromedp request capture + CSP parser"),
   dict(id="AG-NET-02",title="Override library default CDN loaders",sev="CRITICAL",
@@ -89,13 +89,13 @@ RULES = [
    tool="AST/regex scan + CSP parser"),
   dict(id="AG-NET-04",title="Constrain connect-src",sev="CRITICAL",
    applies="MUST · L0 L1   (conditional · L2)",ct="static",
-   why="The browser-enforced air-gap for XHR/fetch/WebSocket. connect-src 'none' makes that exfiltration channel impossible regardless of any bug or injection. Tools that genuinely need the network declare an explicit allowlist of exact origins — never '*', never a bare scheme.",
+   why="The browser-enforced air-gap for XHR/fetch/WebSocket. connect-src 'none' makes that exfiltration channel impossible regardless of any bug or injection. Tools that genuinely need the network declare an explicit allowlist of exact origins, never '*', never a bare scheme.",
    check="parse CSP connect-src:\n  L0 => exactly 'none' ; L1 => literal-origin allowlist (no '*'/https:)\n  L2 => must exclude every unconsented tracker host",
    fix="Set connect-src 'none' for pure client-side tools; for an agent talking to a local LLM scope to that exact origin only.",
    tool="CSP parser"),
   dict(id="AG-NET-05",title="No third-party egress during load",sev="HIGH",
    applies="MUST · L0   (SHOULD · L1)",ct="dynamic",
-   why="The air-gap claim must be observable, not asserted. A headless load of the surface must contact NO third-party host: every responding origin is the surface's own. This is the necessary, directly-measurable half of 'works offline' — the network is observed during a normal load, not cut, so it proves no cross-origin dependency fired, not that a full offline smoke test passed.",
+   why="The air-gap claim must be observable, not asserted. A headless load of the surface must contact NO third-party host: every responding origin is the surface's own. This is the necessary, directly-measurable half of 'works offline': the network is observed during a normal load, not cut, so it proves no cross-origin dependency fired, not that a full offline smoke test passed.",
    check="headless load; assert every responding host is same-origin\n(zero third-party responses observed during the load)",
    fix="Eliminate cross-origin subresources and runtime calls (AG-NET-01/02/04); serve every asset and data pack from your own origin.",
    tool="chromedp request/response capture"),
@@ -113,13 +113,13 @@ RULES = [
    tool="chromedp SW inspection"),
   dict(id="AG-NET-08",title="Violation/error reporting stays same-origin",sev="MEDIUM",
    applies="MUST · L0 L1",ct="static",
-   why="CSP report-to / Reporting-Endpoints / NEL pointed at a third-party SaaS collector silently re-introduces egress and ships metadata about every visitor and violation off-origin — defeating the air-gap through the back door.",
+   why="CSP report-to / Reporting-Endpoints / NEL pointed at a third-party SaaS collector silently re-introduces egress and ships metadata about every visitor and violation off-origin, defeating the air-gap through the back door.",
    check="Reporting-Endpoints / report-to / NEL targets ⊆ {self}  OR  absent",
    fix="Collect reports at a same-origin endpoint, or disable reporting on air-gapped surfaces.",
    tool="header + CSP parser"),
   dict(id="AG-NET-09",title="External _blank links sever the opener; privacy surfaces sever the referrer",sev="MEDIUM",
    applies="MUST · L0 L1 L2",ct="static",
-   why="Property: no <a target=_blank> exposes window.opener to the destination (reverse tabnabbing). The opener is severed by rel containing 'noopener' OR 'noreferrer' ('noreferrer' implies 'noopener' per the HTML spec). On privacy surfaces the referrer is also suppressed. Browsers now imply noopener for target=_blank by default — treat that as defence-in-depth, not as the control.",
+   why="Property: no <a target=_blank> exposes window.opener to the destination (reverse tabnabbing). The opener is severed by rel containing 'noopener' OR 'noreferrer' ('noreferrer' implies 'noopener' per the HTML spec). On privacy surfaces the referrer is also suppressed. Browsers now imply noopener for target=_blank by default; treat that as defence-in-depth, not as the control.",
    check="for every <a target=_blank>: rel contains 'noopener' or 'noreferrer' ;\non privacy surfaces rel also contains 'noreferrer'",
    fix="Add rel=\"noopener noreferrer\" to external _blank links; noreferrer also blocks referrer leakage.",
    tool="HTML anchor scan"),
@@ -139,13 +139,13 @@ RULES = [
    tool="CSP directive-predicate parser"),
   dict(id="AG-CSP-03",title="Clickjacking control must be header-delivered",sev="HIGH",
    applies="MUST · L0 L1 L2",ct="static",
-   why="frame-ancestors, report-uri/report-to and sandbox are IGNORED when a CSP arrives via <meta>. A meta-only surface therefore has NO clickjacking protection from frame-ancestors — it must come from an X-Frame-Options header. Where neither header can be set (pure GitHub Pages), the surface MUST be stateless and the residual risk recorded.",
+   why="frame-ancestors, report-uri/report-to and sandbox are IGNORED when a CSP arrives via <meta>. A meta-only surface therefore has NO clickjacking protection from frame-ancestors; it must come from an X-Frame-Options header. Where neither header can be set (pure GitHub Pages), the surface MUST be stateless and the residual risk recorded.",
    check="if meta-CSP contains frame-ancestors => FAIL (ineffective)\nrequire X-Frame-Options header  OR  declared stateless: true",
    fix="Move clickjacking control to an XFO header (front with a CDN if the host can't set it), or keep the surface free of auth and state-changing actions.",
    tool="header + CSP parser"),
   dict(id="AG-CSP-04",title="Stage report-only before enforcing",sev="MEDIUM",
    applies="SHOULD · all (mandatory before first enforcing deploy)",ct="manual",
-   why="A CSP that breaks the surface gets disabled in a panic — worse than none. Report-only first turns breakage into telemetry.",
+   why="A CSP that breaks the surface gets disabled in a panic, worse than none. Report-only first turns breakage into telemetry.",
    check="Content-Security-Policy-Report-Only canary in staging before the\nenforcing policy ships ; violations reviewed",
    fix="Deploy report-only, watch violations, then promote to enforcing.",
    tool="staging header + report log"),
@@ -157,7 +157,7 @@ RULES = [
    tool="CSP parser + HTML scan"),
   dict(id="AG-CSP-06",title="Trusted Types for DOM sinks",sev="HIGH",
    applies="MUST · L0 L1   (SHOULD · L2)",ct="static+dynamic",
-   why="Trusted Types eliminate DOM-XSS by forbidding raw string assignment to injection sinks (innerHTML, script.src, eval). For a tool parsing untrusted input — certificates, uploaded files — this closes the highest-impact client-side bug class outright.",
+   why="Trusted Types eliminate DOM-XSS by forbidding raw string assignment to injection sinks (innerHTML, script.src, eval). For a tool parsing untrusted input (certificates, uploaded files), this closes the highest-impact client-side bug class outright.",
    check="CSP require-trusted-types-for 'script' ;\ntrusted-types <named-policy-list>  (no '*'; 'none' if no policy needed)",
    fix="Enable Trusted Types; route any required HTML through one vetted, sanitizer-backed policy.",
    tool="CSP parser + runtime violation check"),
@@ -165,11 +165,11 @@ RULES = [
  ("§4","Transport &amp; Response Headers","AG-HDR",[
   dict(id="AG-HDR-01",title="HSTS with a real max-age",sev="HIGH",
    applies="MUST · header-capable backends",ct="static",
-   why="max-age=0 DISABLES HSTS and disqualifies the domain from preload while still looking configured — the most common silent regression: the toggle is on, the value is zero.",
+   why="max-age=0 DISABLES HSTS and disqualifies the domain from preload while still looking configured: the most common silent regression: the toggle is on, the value is zero.",
    check="Strict-Transport-Security: max-age >= 31536000; includeSubDomains;\npreload      (max-age < 31536000 => FAIL)",
-   fix="Set max-age to one year. On Cloudflare this lives under SSL/TLS → Edge Certificates → HSTS — check the value, not just the switch.",
+   fix="Set max-age to one year. On Cloudflare this lives under SSL/TLS → Edge Certificates → HSTS; check the value, not just the switch.",
    tool="header parser"),
-  dict(id="AG-HDR-01a",title="HSTS scope is sticky — gate it",sev="HIGH",
+  dict(id="AG-HDR-01a",title="HSTS scope is sticky: gate it",sev="HIGH",
    applies="MUST · before enabling AG-HDR-01",ct="manual",
    why="includeSubDomains + preload apply to every subdomain and are hard to reverse. Enable them before a subdomain is permanently on HTTPS and you can lock yourself out of it.",
    check="enumerate every subdomain => each returns valid HTTPS\n(GitHub Pages: 'Enforce HTTPS' ON) ; record preload submission state",
@@ -233,7 +233,7 @@ RULES = [
    tool="dig +dnssec / delv"),
   dict(id="AG-DNS-03",title="No danglable records (subdomain takeover)",sev="HIGH",
    applies="MUST · L0 L1 L2",ct="static",
-   why="A CNAME to a deprovisioned service — a removed Pages site, an unclaimed bucket — is a hijackable subdomain: a live foothold under your brand. Mixed estates (Pages subdomains + a proxied apex) are the usual culprit.",
+   why="A CNAME to a deprovisioned service (a removed Pages site, an unclaimed bucket) is a hijackable subdomain: a live foothold under your brand. Mixed estates (Pages subdomains + a proxied apex) are the usual culprit.",
    check="every CNAME target resolves to a claimed/active resource ;\nno NXDOMAIN / unclaimed-service takeover fingerprints",
    fix="Remove or repoint stale records the moment a service is decommissioned.",
    tool="dnsReaper / subjack"),
@@ -241,7 +241,7 @@ RULES = [
  ("§6","Supply Chain &amp; Build Integrity","AG-SUP",[
   dict(id="AG-SUP-01",title="SRI on any unavoidable cross-origin subresource",sev="HIGH",
    applies="MUST · L0 L1 L2",ct="static",
-   why="Eliminating cross-origin subresources (AG-NET-01) makes this moot — the strongest answer. Where one must remain, integrity pinning stops a compromised CDN swapping the file.",
+   why="Eliminating cross-origin subresources (AG-NET-01) makes this moot: the strongest answer. Where one must remain, integrity pinning stops a compromised CDN swapping the file.",
    check="every cross-origin <script>/<link rel=stylesheet> has integrity=\nAND crossorigin=   ; else FAIL",
    fix="Prefer self-hosting; otherwise add SRI hashes and re-pin on every version bump.",
    tool="HTML parser"),
@@ -291,7 +291,7 @@ RULES = [
  ("§7","Build Pipeline / CI Hardening","AG-CI",[
   dict(id="AG-CI-01",title="Pin third-party Actions/steps to a full commit SHA",sev="HIGH",
    applies="MUST · L0 L1 L2",ct="static",
-   why="A mutable tag (@v4) lets the action's owner — or whoever compromises them — change the code you run with repo write access. A 40-hex commit SHA is immutable.",
+   why="A mutable tag (@v4) lets the action's owner (or whoever compromises them) change the code you run with repo write access. A 40-hex commit SHA is immutable.",
    check="every `uses:` referencing a third party pins a full 40-char\ncommit SHA (not a tag or branch)",
    fix="Replace tags with the resolved SHA; let a bot bump SHAs under review.",
    tool="zizmor / actionlint / ripgrep 'uses:.*@(?![0-9a-f]{40})'"),
@@ -303,7 +303,7 @@ RULES = [
    tool="actionlint / policy check"),
   dict(id="AG-CI-03",title="No untrusted code in a privileged context",sev="CRITICAL",
    applies="MUST · L0 L1 L2",ct="static",
-   why="A pull_request_target job (which carries secrets) that checks out and builds/executes the PR head runs attacker-supplied code with your credentials — a classic CI takeover.",
+   why="A pull_request_target job (which carries secrets) that checks out and builds/executes the PR head runs attacker-supplied code with your credentials: a classic CI takeover.",
    check="no pull_request_target job checks out head.ref AND runs\nbuild/exec/install with access to secrets",
    fix="Use pull_request (no secrets) for untrusted code, or split so the privileged job never executes PR code.",
    tool="zizmor / workflow analysis"),
@@ -335,7 +335,7 @@ RULES = [
    tool="chromedp request capture"),
   dict(id="AG-PRV-02",title="Prior blocking of non-essential third parties",sev="CRITICAL",
    applies="MUST · L0 L1 L2 (decisive at L2)",ct="dynamic",
-   why="No analytics / ads / embeds / fonts may fire before explicit opt-in. EU law requires PRIOR blocking; exporting IPs to US analytics is a transfer-law exposure. Loading the tracker on page load and letting the visitor decline afterwards is the exact anti-pattern — the cookie is already set and the hit already sent.",
+   why="No analytics / ads / embeds / fonts may fire before explicit opt-in. EU law requires PRIOR blocking; exporting IPs to US analytics is a transfer-law exposure. Loading the tracker on page load and letting the visitor decline afterwards is the exact anti-pattern: the cookie is already set and the hit already sent.",
    check="first visit, NO consent cookie => zero requests to analytics/ad\nhosts AND zero non-essential cookies set",
    fix="Consent Mode with analytics_storage/ad_storage = denied by default, granted only after explicit consent; wire the banner's accept/decline to actually toggle loading. Or drop third-party analytics for an EU-hosted, cookieless one.",
    tool="chromedp (no-consent first-visit capture)"),
@@ -393,7 +393,7 @@ RULES = [
    tool="manifest cross-check"),
   dict(id="AG-GOV-02",title="Waivers auto-expire; the runner enforces it",sev="HIGH",
    applies="MUST · when deviations exist",ct="static",
-   why="A waiver without enforced expiry becomes permanent debt. The runner compares expires against now; an expired or missing expiry re-enforces the rule immediately, so a waiver can only ever buy bounded time — a fake far-future date still decays on renewal.",
+   why="A waiver without enforced expiry becomes permanent debt. The runner compares expires against now; an expired or missing expiry re-enforces the rule immediately, so a waiver can only ever buy bounded time: a fake far-future date still decays on renewal.",
    check="every deviation has expires <= now + max_window ; expired/absent\nexpiry => the rule is re-enforced (fail)",
    fix="Set a real, short expiry; renew under review or remediate.",
    tool="runner clock check"),
@@ -405,25 +405,25 @@ RULES = [
    tool="runner budget check"),
   dict(id="AG-GOV-04",title="Segregation of duties on waivers",sev="HIGH",
    applies="MUST · when deviations exist (Gold)",ct="static",
-   why="A self-approved waiver is no control. Each deviation must be signed by an authorized approver distinct from the change author — turning a waiver into an attributable, accountable act rather than anonymous YAML.",
+   why="A self-approved waiver is no control. Each deviation must be signed by an authorized approver distinct from the change author, turning a waiver into an attributable, accountable act rather than anonymous YAML.",
    check="each deviation carries approver != author AND a signature\nverifiable against an approver allowlist",
    fix="Route waivers through a named approver; sign them; reject self-approval.",
    tool="cosign / signed-off-by + approver allowlist"),
   dict(id="AG-GOV-05",title="Conformance record is externally derived and signed",sev="HIGH",
    applies="MUST · L0 L1 L2 (Gold)",ct="dynamic",
-   why="A record produced inside a compromised build host can be forged. The authoritative record is produced by an independent runner observing the LIVE deployed surface — headers, egress, DNS and TLS are externally observable — and is signed and bound to the artifact digest, so build-host compromise cannot fabricate production reality.",
+   why="A record produced inside a compromised build host can be forged. The authoritative record is produced by an independent runner observing the LIVE deployed surface (headers, egress, DNS and TLS are externally observable) and is signed and bound to the artifact digest, so build-host compromise cannot fabricate production reality.",
    check="record generated against the live URL by an out-of-band runner ;\nsigned (in-toto / cosign) ; bound to artifact digest ; signature verifies",
    fix="Run the gate against production from a separate trusted runner; sign the attestation; verify on consumption.",
    tool="external runner + cosign / in-toto attestation"),
   dict(id="AG-GOV-06",title="Active egress canary - prove the wall, do not observe its silence",sev="HIGH",
    applies="MUST · L0 L1",ct="dynamic",
-   why="Observing 'no egress during a test' proves a negative and is defeated by env-detecting, time-delayed or interaction-gated exfiltration. Instead the harness injects a known exfil probe and asserts the policy BLOCKS it — a positive test of a capability boundary that holds in production for every visitor regardless of attacker timing. CSP is the boundary; the canary proves it is real.",
+   why="Observing 'no egress during a test' proves a negative and is defeated by env-detecting, time-delayed or interaction-gated exfiltration. Instead the harness injects a known exfil probe and asserts the policy BLOCKS it: a positive test of a capability boundary that holds in production for every visitor regardless of attacker timing. CSP is the boundary; the canary proves it is real.",
    check="synthetic beacon to a non-allowlisted origin (fetch/img/beacon/ws)\nis blocked by CSP ; a violation is recorded ; production same-origin\nreporting is collecting",
    fix="Lock every fetch-directive to self (AG-NET-01); add the blocked-probe test; collect violation reports same-origin in production.",
    tool="chromedp + injected probe + CSP report endpoint"),
   dict(id="AG-GOV-07",title="Build environment is ephemeral and hermetic",sev="HIGH",
    applies="MUST · L0 L1 L2 (Gold)",ct="static",
-   why="A persistent build agent is a persistent foothold that can tamper outputs after the gate. A fresh isolated runner per build, a base image pinned by digest, and short-lived OIDC credentials shrink the window in which the host can forge results — and pair with external verification (AG-GOV-05) so tampering is contradicted by the production scan.",
+   why="A persistent build agent is a persistent foothold that can tamper outputs after the gate. A fresh isolated runner per build, a base image pinned by digest, and short-lived OIDC credentials shrink the window in which the host can forge results, and pair with external verification (AG-GOV-05) so tampering is contradicted by the production scan.",
    check="build runs on a fresh ephemeral runner ; base image pinned by\ndigest ; credentials are short-lived OIDC (no long-lived secrets on agent)",
    fix="Use ephemeral CI runners, digest-pinned images and OIDC federation instead of stored secrets.",
    tool="CI config review + provenance"),
@@ -467,7 +467,7 @@ CF_HEADERS = """# Cloudflare Pages / Netlify  ->  _headers   (header-capable bac
 #   and never weakens frame-ancestors / object-src / base-uri.
 """
 
-AIRGAP_YML = """# .airgap.yml  — one per repo. The fleet runner reads this to know what
+AIRGAP_YML = """# .airgap.yml: one per repo. The fleet runner reads this to know what
 # to check and at which strictness. The signed JSON output (AG-GOV-05) is
 # the conformance record (evidence) and is retained per build.
 target_profile: Bronze           # Bronze | Silver | Gold (cumulative)
@@ -496,14 +496,14 @@ deviations: []                   # SHOULD-only; MUSTs are never waivable (AG-GOV
   #     evidence: https://github.com/org/repo/issues/123 }
 """
 
-CI_GATE = """# conformance gate (pseudo) — profile-scoped, prod-observed, signed
+CI_GATE = """# conformance gate (pseudo): profile-scoped, prod-observed, signed
 def gate(surface):
     rules = [r for r in MANIFEST
              if r.in_profile(surface.target_profile)         # Bronze/Silver/Gold
              and r.applies_at(surface.level, surface)]
     results = [run_external(r, surface.live_url) for r in rules]   # black-box, prod
     record  = sign(emit_json(results), artifact_digest)           # AG-GOV-05
-    # waiver governance — AG-GOV-01..04
+    # waiver governance: AG-GOV-01..04
     valid = [w for w in surface.deviations
              if not w.rule.is_must                 # never waive a MUST (AG-GOV-01)
              and w.expires > now                   # auto-expire        (AG-GOV-02)
@@ -544,21 +544,21 @@ FRONT = """
 <div class="lead"><b>Versioning.</b> This standard follows Semantic Versioning: rule IDs are stable and never reused; adding a rule or profile is a MINOR release, tightening or removing a MUST is a MAJOR. <b>This is __DOC_VER__</b>, incorporating the responses to an adversarial review: property-based conformance, containment-first verification, external signed attestation, governed waivers, and risk-proportional profiles.</div>
 
 <h3>Normative language</h3>
-<p><b>MUST</b>, <b>MUST NOT</b>, <b>SHOULD</b>, <b>SHOULD NOT</b> and <b>MAY</b> follow RFC&nbsp;2119 / RFC&nbsp;8174. A MUST is mandatory and <b>can never be waived</b> (AG-GOV-01). A SHOULD is strongly recommended; a deviation is permitted only under the waiver governance of §10 — bounded, expiring, attributable. There are no silent skips.</p>
+<p><b>MUST</b>, <b>MUST NOT</b>, <b>SHOULD</b>, <b>SHOULD NOT</b> and <b>MAY</b> follow RFC&nbsp;2119 / RFC&nbsp;8174. A MUST is mandatory and <b>can never be waived</b> (AG-GOV-01). A SHOULD is strongly recommended; a deviation is permitted only under the waiver governance of §10: bounded, expiring, attributable. There are no silent skips.</p>
 
 <h3>Properties, not mechanisms</h3>
-<p>Each rule specifies a security <i>property</i> (e.g. &ldquo;the page cannot be framed&rdquo;, &ldquo;no third-party egress&rdquo;), satisfiable by any control in its equivalence set and recorded with an <i>assurance tier</i>. The standard mandates the property; the mechanism is a documented choice. This is what makes it vendor-neutral: a stateless GitHub&nbsp;Pages site (Tier&nbsp;D) and a header-setting CDN (Tier&nbsp;A) can both satisfy the anti-framing property — pure static hosting is not condemned, and putting a CDN in front is an explicit, recorded expansion of the trust chain, never an implicit mandate.</p>
+<p>Each rule specifies a security <i>property</i> (e.g. &ldquo;the page cannot be framed&rdquo;, &ldquo;no third-party egress&rdquo;), satisfiable by any control in its equivalence set and recorded with an <i>assurance tier</i>. The standard mandates the property; the mechanism is a documented choice. This is what makes it vendor-neutral: a stateless GitHub&nbsp;Pages site (Tier&nbsp;D) and a header-setting CDN (Tier&nbsp;A) can both satisfy the anti-framing property: pure static hosting is not condemned, and putting a CDN in front is an explicit, recorded expansion of the trust chain, never an implicit mandate.</p>
 <table class="grid"><thead><tr><th>Tier</th><th>Enforcement</th><th>Example</th></tr></thead><tbody>
 <tr><td><b>A</b></td><td>Browser-enforced via HTTP response header</td><td>X-Frame-Options / header CSP frame-ancestors</td></tr>
 <tr><td><b>B</b></td><td>Browser-enforced via &lt;meta&gt; (directives the meta form honors)</td><td>meta CSP script-src / connect-src</td></tr>
 <tr><td><b>C</b></td><td>Runtime / script-enforced</td><td>frame-buster on a header-less host</td></tr>
-<tr><td><b>D</b></td><td>Structural — the protected asset does not exist</td><td>statelessness removes clickjacking impact entirely</td></tr>
+<tr><td><b>D</b></td><td>Structural: the protected asset does not exist</td><td>statelessness removes clickjacking impact entirely</td></tr>
 </tbody></table>
 
 <h3>Containment over observation</h3>
-<p>Guarantees come from <b>capability boundaries enforced in production for every visitor</b> — a CSP that denies all third-party fetch-directives, an egress allowlist — not from observing the absence of bad behavior in a test. A time-delayed, environment-detecting or interaction-gated exfiltration attempt still strikes the production boundary. Verification therefore proves the boundary <i>blocks a known probe</i> (the egress canary, AG-GOV-06) and is corroborated by same-origin violation reporting from real users; it does not certify a negative. CSP is not a complete egress oracle — WebRTC and DNS-prefetch are residual channels that Gold profiles deny explicitly and the canary probes.</p>
+<p>Guarantees come from <b>capability boundaries enforced in production for every visitor</b> (a CSP that denies all third-party fetch-directives, an egress allowlist), not from observing the absence of bad behavior in a test. A time-delayed, environment-detecting or interaction-gated exfiltration attempt still strikes the production boundary. Verification therefore proves the boundary <i>blocks a known probe</i> (the egress canary, AG-GOV-06) and is corroborated by same-origin violation reporting from real users; it does not certify a negative. CSP is not a complete egress oracle: WebRTC and DNS-prefetch are residual channels that Gold profiles deny explicitly and the canary probes.</p>
 
-<h3>Conformance is binary — within a declared profile</h3>
+<h3>Conformance is binary, within a declared profile</h3>
 <p>Burden must match value, so the rules are partitioned into three cumulative profiles. A surface declares its <b>target profile</b> in <code>.airgap.yml</code>; the gate enforces exactly that profile's subset. A surface is <b>conformant at its target profile</b> iff every MUST in that subset passes and every SHOULD passes or carries a governed deviation. A single failed MUST = non-conformant; the weighted score (§12) only orders remediation.</p>
 <table class="grid"><thead><tr><th>Profile</th><th>For</th><th>Adds</th></tr></thead><tbody>
 __PROFILE_ROWS__
@@ -566,10 +566,10 @@ __PROFILE_ROWS__
 <p class="note">Profiles are cumulative: Gold &#8835; Silver &#8835; Bronze. Each rule below is tagged with the lowest profile that requires it.</p>
 
 <h3>Governed waivers (not free text)</h3>
-<p>The deviation mechanism is the most-attacked part of any standard, so it is constrained by construction: MUSTs are non-waivable (AG-GOV-01); every waiver carries an enforced expiry after which the runner re-enforces the rule (AG-GOV-02); a per-surface debt ceiling caps total active waivers (AG-GOV-03); and at Gold each waiver is signed by an approver other than the change author (AG-GOV-04). The runner governs the <i>mechanics</i>; the <i>truthfulness</i> of a justification is a named human's accountable decision — this standard does not pretend a deterministic runner can judge intent.</p>
+<p>The deviation mechanism is the most-attacked part of any standard, so it is constrained by construction: MUSTs are non-waivable (AG-GOV-01); every waiver carries an enforced expiry after which the runner re-enforces the rule (AG-GOV-02); a per-surface debt ceiling caps total active waivers (AG-GOV-03); and at Gold each waiver is signed by an approver other than the change author (AG-GOV-04). The runner governs the <i>mechanics</i>; the <i>truthfulness</i> of a justification is a named human's accountable decision; this standard does not pretend a deterministic runner can judge intent.</p>
 
 <h3>Evidence &amp; external verification</h3>
-<p>The authoritative conformance record is produced by an <b>independent runner observing the live deployed surface</b> (headers, egress, DNS and TLS are externally observable), signed and bound to the artifact digest (AG-GOV-05) — so a compromised build host cannot fabricate production reality. Build-host integrity is treated as a trust dependency defended by ephemeral hermetic builds (AG-GOV-07) and that external attestation; its full specification is out of scope (Appendix&nbsp;F), but it is not assumed away.</p>
+<p>The authoritative conformance record is produced by an <b>independent runner observing the live deployed surface</b> (headers, egress, DNS and TLS are externally observable), signed and bound to the artifact digest (AG-GOV-05), so a compromised build host cannot fabricate production reality. Build-host integrity is treated as a trust dependency defended by ephemeral hermetic builds (AG-GOV-07) and that external attestation; its full specification is out of scope (Appendix&nbsp;F), but it is not assumed away.</p>
 
 <h3>Anti-paralysis</h3>
 <p>Rigidity that exhausts teams gets bypassed, so the standard mandates the labor-saving automation alongside the control: a bot keeps pinned Action SHAs current (AG-CI-01) so no one edits 40-character hashes by hand; CSP is staged report-only before enforcing (AG-CSP-04); and a conformant starter (the <code>_headers</code>, <code>.airgap.yml</code> and CI gate) ships green by default, making conformance the path of least resistance rather than an obstacle.</p>
@@ -596,9 +596,9 @@ LEVEL_ROWS = [
   "no pre-consent egress; trackers behind consent","product / docs / marketing site"),
 ]
 FRONT = FRONT.replace("__DOC_VER__", DOC_VER).replace("__PROFILE_ROWS__", "\n".join(
-    "<tr><td><b>%s</b> — %s</td><td>%s</td><td>%s</td></tr>" % row for row in PROFILE_ROWS))
+    "<tr><td><b>%s</b>: %s</td><td>%s</td><td>%s</td></tr>" % row for row in PROFILE_ROWS))
 LEVEL_TABLE_ROWS = "\n".join(
-    "<tr><td><b>%s</b> — %s</td><td>%s</td><td>%s</td><td>%s</td></tr>" % row for row in LEVEL_ROWS)
+    "<tr><td><b>%s</b>: %s</td><td>%s</td><td>%s</td><td>%s</td></tr>" % row for row in LEVEL_ROWS)
 
 APP_TOOL = """
 <h2>Appendix D &nbsp;Tooling Reference <span class="pfx">by check family</span></h2>
@@ -626,26 +626,26 @@ APP_REF = """
 <tr><td>Keyword interpretation</td><td>RFC 2119; RFC 8174</td></tr>
 <tr><td>HSTS</td><td>RFC 6797; HSTS preload inclusion criteria (max-age ≥ 1 year, includeSubDomains, preload)</td></tr>
 <tr><td>Disclosure / well-known</td><td>RFC 9116 (security.txt); RFC 8615 (well-known URIs)</td></tr>
-<tr><td>CSP</td><td>W3C CSP Level 3 — incl. that frame-ancestors, report-uri/report-to and sandbox are ignored when delivered via &lt;meta&gt;</td></tr>
+<tr><td>CSP</td><td>W3C CSP Level 3, incl. that frame-ancestors, report-uri/report-to and sandbox are ignored when delivered via &lt;meta&gt;</td></tr>
 <tr><td>DOM-XSS hardening</td><td>W3C Trusted Types</td></tr>
 <tr><td>Cross-origin isolation</td><td>COOP, COEP and the SharedArrayBuffer prerequisite</td></tr>
 <tr><td>Supply chain</td><td>SLSA framework; CycloneDX / SPDX (SBOM); OSV; OpenSSF Scorecard</td></tr>
 <tr><td>Prior consent (EU)</td><td>ePrivacy Directive 2002/58/EC, Art. 5(3)</td></tr>
 <tr><td>Data transfers (EU)</td><td>CJEU C-311/18 (&ldquo;Schrems II&rdquo;, 2020)</td></tr>
-<tr><td>Analytics transfers</td><td>Italian Garante — 2022 decision on unlawful Google Analytics transfers</td></tr>
-<tr><td>Embedded fonts</td><td>LG München I — 2022 ruling on Google Fonts embedding and IP transfer</td></tr>
+<tr><td>Analytics transfers</td><td>Italian Garante, 2022 decision on unlawful Google Analytics transfers</td></tr>
+<tr><td>Embedded fonts</td><td>LG München I, 2022 ruling on Google Fonts embedding and IP transfer</td></tr>
 </tbody></table>
 """
 
 APP_NONGOALS = """
 <h2>Appendix F &nbsp;Trust Dependencies &amp; Non-Goals (Out of Scope to Specify)</h2>
-<p>The following are out of scope to <i>specify</i> here — they belong to adjacent standards — but where the threat model depends on them they are treated as <b>trust dependencies with compensating controls</b>, not as assumptions:</p>
+<p>The following are out of scope to <i>specify</i> here (they belong to adjacent standards), but where the threat model depends on them they are treated as <b>trust dependencies with compensating controls</b>, not as assumptions:</p>
 <table class="grid"><tbody>
-<tr><td><b>Build-host / runner integrity</b> — not assumed hardened. Defended by ephemeral hermetic builds (AG-GOV-07) and by deriving the authoritative conformance record externally from the live surface and signing it (AG-GOV-05), so a compromised build host cannot forge production reality. Its full hardening specification belongs to a separate standard.</td></tr>
+<tr><td><b>Build-host / runner integrity</b>: not assumed hardened. Defended by ephemeral hermetic builds (AG-GOV-07) and by deriving the authoritative conformance record externally from the live surface and signing it (AG-GOV-05), so a compromised build host cannot forge production reality. Its full hardening specification belongs to a separate standard.</td></tr>
 <tr><td>Server-side / application security of any dynamic backend (authz logic, injection in server code)</td></tr>
 <tr><td>Email-domain anti-abuse (SPF / DKIM / DMARC)</td></tr>
 <tr><td>Account, session and identity security beyond the static surface</td></tr>
-<tr><td>Accessibility (WCAG) and SEO — important, but a separate concern</td></tr>
+<tr><td>Accessibility (WCAG) and SEO: important, but a separate concern</td></tr>
 </tbody></table>
 """
 
@@ -737,8 +737,8 @@ table.grid tr:nth-child(even) td {{ background:#f8fafc; }}
 {FRONT}
 
 <h2>§1 &nbsp;Threat Model &amp; Conformance Levels</h2>
-<p class="lead"><b>Scope.</b> Any deployed <i>static surface</i> — a client-side tool, a documentation site, or a marketing site — whose security posture rests on the promise that user data and document content never leave the browser, and ideally that the page performs no unsanctioned network egress at all. The rules are backend-agnostic; <b>§11</b> maps each control onto what GitHub Pages, Cloudflare Pages, proxied Cloudflare, Fastly, Netlify and CloudFront can actually enforce.</p>
-<p><b>Threat model.</b> A passive network observer; a compromised or hostile third-party CDN serving the code that touches the document; a hostile embedder (clickjacking); a compromised build pipeline or dependency; data exfiltration through any third-party request; subdomain takeover; and regulatory exposure created by pre-consent third-party calls. Every rule composes into a deterministic conformance gate — the &ldquo;deterministic labyrinth&rdquo;: scan &rarr; per-rule pass/fail &rarr; weighted score &rarr; fix queue &rarr; retained evidence.</p>
+<p class="lead"><b>Scope.</b> Any deployed <i>static surface</i> (a client-side tool, a documentation site, or a marketing site) whose security posture rests on the promise that user data and document content never leave the browser, and ideally that the page performs no unsanctioned network egress at all. The rules are backend-agnostic; <b>§11</b> maps each control onto what GitHub Pages, Cloudflare Pages, proxied Cloudflare, Fastly, Netlify and CloudFront can actually enforce.</p>
+<p><b>Threat model.</b> A passive network observer; a compromised or hostile third-party CDN serving the code that touches the document; a hostile embedder (clickjacking); a compromised build pipeline or dependency; data exfiltration through any third-party request; subdomain takeover; and regulatory exposure created by pre-consent third-party calls. Every rule composes into a deterministic conformance gate, the &ldquo;deterministic labyrinth&rdquo;: scan &rarr; per-rule pass/fail &rarr; weighted score &rarr; fix queue &rarr; retained evidence.</p>
 <h3>Conformance levels</h3>
 <table class="grid"><thead><tr><th>Level</th><th>Meaning</th><th>Defining control</th><th>Typical surface</th></tr></thead><tbody>
 {LEVEL_TABLE_ROWS}
@@ -747,12 +747,12 @@ table.grid tr:nth-child(even) td {{ background:#f8fafc; }}
 {sections_html}
 
 <h2>§11 &nbsp;Hosting-Backend Conformance Matrix <span class="pfx">AG-HOST</span></h2>
-<p>The same rule is enforceable in different ways — or not at all — depending on whether the edge can set response headers. GitHub Pages is the constrained case: <b>no custom response headers</b>, so CSP exists only as <code>&lt;meta&gt;</code> (with the AG-CSP-03 limitation) and real HSTS/XFO/nosniff need a CDN in front. Everything below can enforce the full header set.</p>
+<p>The same rule is enforceable in different ways, or not at all, depending on whether the edge can set response headers. GitHub Pages is the constrained case: <b>no custom response headers</b>, so CSP exists only as <code>&lt;meta&gt;</code> (with the AG-CSP-03 limitation) and real HSTS/XFO/nosniff need a CDN in front. Everything below can enforce the full header set.</p>
 {host_table()}
-<p class="note">The DNS family (§5) is independent of the edge: CAA, DNSSEC and dangling-record checks apply at the DNS provider whatever serves the bytes. Mixed estates are common — a project's tool/docs subdomains on GitHub Pages (DNS-only) while the apex is proxied through Cloudflare; headers are settable on the apex and not on the Pages subdomains, and decommissioned Pages subdomains are the prime subdomain-takeover risk (AG-DNS-03). Apply fixes per surface, not per project. For clickjacking specifically, a header-less host reaches the anti-framing property structurally: a stateless surface (Tier&nbsp;D) or a frame-buster (Tier&nbsp;C) satisfies it, so a CDN is not required for conformance — adding one to gain headers is a recorded trust-chain expansion (a new TLS-terminating third party), weighed as such.</p>
+<p class="note">The DNS family (§5) is independent of the edge: CAA, DNSSEC and dangling-record checks apply at the DNS provider whatever serves the bytes. Mixed estates are common: a project's tool/docs subdomains on GitHub Pages (DNS-only) while the apex is proxied through Cloudflare; headers are settable on the apex and not on the Pages subdomains, and decommissioned Pages subdomains are the prime subdomain-takeover risk (AG-DNS-03). Apply fixes per surface, not per project. For clickjacking specifically, a header-less host reaches the anti-framing property structurally: a stateless surface (Tier&nbsp;D) or a frame-buster (Tier&nbsp;C) satisfies it, so a CDN is not required for conformance; adding one to gain headers is a recorded trust-chain expansion (a new TLS-terminating third party), weighed as such.</p>
 
-<h2>§12 &nbsp;The Deterministic Labyrinth — Verification Harness <span class="pfx">AG-VER</span></h2>
-<p>Operationalize the standard as a fleet-level conformance runner. Each repo declares a <b>target profile</b> and its surfaces; the runner evaluates only that profile's applicable rules <b>against the live deployed surface</b>, emits a weighted score and a severity-ordered fix queue, signs a JSON evidence record bound to the artifact digest (AG-GOV-05), and is idempotent on <code>(surface.url, rule.id)</code>. Waivers pass through the governance of §10 — never covering a MUST, auto-expiring, and within the per-surface budget.</p>
+<h2>§12 &nbsp;The Deterministic Labyrinth: Verification Harness <span class="pfx">AG-VER</span></h2>
+<p>Operationalize the standard as a fleet-level conformance runner. Each repo declares a <b>target profile</b> and its surfaces; the runner evaluates only that profile's applicable rules <b>against the live deployed surface</b>, emits a weighted score and a severity-ordered fix queue, signs a JSON evidence record bound to the artifact digest (AG-GOV-05), and is idempotent on <code>(surface.url, rule.id)</code>. Waivers pass through the governance of §10: never covering a MUST, auto-expiring, and within the per-surface budget.</p>
 <h3>Per-repo declaration</h3>{code(AIRGAP_YML)}
 <h3>Canonical header block (header-capable backends)</h3>{code(CF_HEADERS)}
 <h3>Conformance gate</h3>{code(CI_GATE)}
@@ -762,15 +762,15 @@ table.grid tr:nth-child(even) td {{ background:#f8fafc; }}
 <table class="grid idxtable"><thead><tr><th>ID</th><th>Rule</th><th>Severity</th><th>Profile</th><th>Obligation</th></tr></thead><tbody>{idx_rows}</tbody></table>
 
 <h2>Appendix B &nbsp;Machine-Readable Manifest</h2>
-<p class="note">Emitted from the same rule source as this document — spec text, tooling and manifest cannot drift. Feed it to the gate in §12.</p>
+<p class="note">Emitted from the same rule source as this document: spec text, tooling and manifest cannot drift. Feed it to the gate in §12.</p>
 {code(manifest_yaml)}
 
 <h2>Appendix C &nbsp;Severity &rarr; Gating Policy</h2>
 <table class="grid"><thead><tr><th>Severity</th><th>Weight</th><th>Build effect on failure</th></tr></thead><tbody>
 <tr><td>{badge('CRITICAL')}</td><td>8</td><td>block</td></tr>
 <tr><td>{badge('HIGH')}</td><td>4</td><td>block</td></tr>
-<tr><td>{badge('MEDIUM')}</td><td>2</td><td>advisory — record a deviation to waive</td></tr>
-<tr><td>{badge('LOW')}</td><td>1</td><td>advisory — record a deviation to waive</td></tr>
+<tr><td>{badge('MEDIUM')}</td><td>2</td><td>advisory; record a deviation to waive</td></tr>
+<tr><td>{badge('LOW')}</td><td>1</td><td>advisory; record a deviation to waive</td></tr>
 </tbody></table>
 
 {APP_TOOL}
@@ -820,7 +820,7 @@ def level_modes(applies):
 # "spec and runner cannot drift" is enforced by a test, not just promised in the README.
 manifest_path = os.path.join(_here, "..", "internal", "rules", "manifest.yaml")
 with open(manifest_path, "w") as mf:
-    mf.write("# GENERATED by standard/build_pdf.py from the RULES source — DO NOT EDIT BY HAND.\n"
+    mf.write("# GENERATED by standard/build_pdf.py from the RULES source. DO NOT EDIT BY HAND.\n"
              "# The runner's internal/rules/skew_test.go asserts registry.go matches this file,\n"
              "# so the spec and the runner cannot drift. Regenerate: cd standard && python build_pdf.py\n"
              "rules:\n")
@@ -841,7 +841,7 @@ _GO = {"required": "LevelRequired", "advisory": "LevelAdvisory",
        "out_of_scope": "LevelOutOfScope", "forbidden": "LevelForbidden"}
 levels_go_path = os.path.join(_here, "..", "internal", "rules", "levels_gen.go")
 with open(levels_go_path, "w") as lf:
-    lf.write("// Code generated by standard/build_pdf.py from the rules' `applies` strings — DO NOT EDIT.\n"
+    lf.write("// Code generated by standard/build_pdf.py from the rules' `applies` strings. DO NOT EDIT.\n"
              "// Regenerate: cd standard && python build_pdf.py\n\n"
              "package rules\n\n"
              "// levelModes maps a rule id to its mode at [L0, L1, L2]. A rule absent from the\n"
@@ -857,11 +857,11 @@ with open(levels_go_path, "w") as lf:
 print("levels:", os.path.relpath(levels_go_path, _here))
 
 # --- generated Go constant: the runner's banner and signed conformance record
-# carry the same standard version as this document — derived from CHANGELOG.md
+# carry the same standard version as this document: derived from CHANGELOG.md
 # through this generator, never hand-bumped. CI diffs it like the manifest.
 version_go_path = os.path.join(_here, "..", "internal", "rules", "version_gen.go")
 with open(version_go_path, "w") as vf:
-    vf.write("// Code generated by standard/build_pdf.py from CHANGELOG.md — DO NOT EDIT.\n"
+    vf.write("// Code generated by standard/build_pdf.py from CHANGELOG.md. DO NOT EDIT.\n"
              "// Regenerate: cd standard && python build_pdf.py\n\n"
              "package rules\n\n"
              "// StandardVersion is the AGSSH-STD-001 document version this build of the\n"
@@ -906,23 +906,23 @@ import html as _html
 def _md(s):
     return _html.unescape(s).replace("|", "\\|")
 _md_lines = [
-    "<!-- GENERATED by standard/build_pdf.py from the RULES source — DO NOT EDIT BY HAND. -->\n",
-    "# AGSSH-STD-001 — Rule reference\n\n",
+    "<!-- GENERATED by standard/build_pdf.py from the RULES source. DO NOT EDIT BY HAND. -->\n",
+    "# AGSSH-STD-001: Rule reference\n\n",
     "**%s** · %d rules · %d families · cumulative profiles **Bronze ⊂ Silver ⊂ Gold**.\n\n" % (DOC_VER, n_rules, n_fam),
-    "This is the browsable index. The full normative text — *why · check · fix · tool* for every rule —\n"
+    "This is the browsable index. The full normative text (*why · check · fix · tool* for every rule) \n"
     "is the [rendered standard](./standard/AGSSH-STD-001-%s.pdf); the machine-readable form the runner is\n"
     "tested against is [`internal/rules/manifest.yaml`](./internal/rules/manifest.yaml). See the\n"
     "[README](./README.md) to run the gate.\n\n" % DOC_VER,
-    "**How to read.** *Obligation* — **MUST** blocks the gate, **SHOULD** is governed-waivable. "
+    "**How to read.** *Obligation*: **MUST** blocks the gate, **SHOULD** is governed-waivable. "
     "*Severity* weights the score and orders the fix queue (Critical 8 · High 4 · Medium 2 · Low 1). "
     "*Profile* is the lowest cumulative tier that includes the rule (Gold ⊇ Silver ⊇ Bronze). "
-    "*Levels* are the strictness bands it applies at — **L0** strict air-gap · **L1** scoped egress · **L2** marketing.\n\n",
+    "*Levels* are the strictness bands it applies at: **L0** strict air-gap · **L1** scoped egress · **L2** marketing.\n\n",
     "| Family | Rules | Theme |\n|---|:--:|---|\n",
 ]
 for (num, title, prefix, rules) in RULES:
     _md_lines.append("| [`%s`](#%s) | %d | %s |\n" % (prefix, prefix.lower(), len(rules), _md(title)))
 for (num, title, prefix, rules) in RULES:
-    _md_lines.append('\n<a id="%s"></a>\n\n## %s %s — %s\n\n' % (prefix.lower(), num, prefix, _md(title)))
+    _md_lines.append('\n<a id="%s"></a>\n\n## %s %s: %s\n\n' % (prefix.lower(), num, prefix, _md(title)))
     _md_lines.append("| Rule | Requirement | Oblig. | Severity | Profile | Levels |\n")
     _md_lines.append("|------|-------------|:------:|:--------:|:------:|:------:|\n")
     for r in rules:
@@ -932,7 +932,7 @@ for (num, title, prefix, rules) in RULES:
         _md_lines.append("| `%s` | %s | %s | %s | %s | %s |\n" % (
             r["id"], _md(r["title"]), oblig, r["sev"], PROF.get(r["id"], "Gold"), _md(applies)))
 _md_lines.append(
-    "\n---\n\n*Generated from `standard/build_pdf.py` — the single source for this file, the PDF and the "
+    "\n---\n\n*Generated from `standard/build_pdf.py`, the single source for this file, the PDF and the "
     "manifest. Regenerate with `cd standard && python build_pdf.py`.*\n")
 rules_md_path = os.path.join(_here, "..", "RULES.md")
 with open(rules_md_path, "w") as rf:
