@@ -1,0 +1,182 @@
+{
+  "name": "agssh",
+  "displayName": "agssh",
+  "description": "Scan a live URL or an .airgap.yml against AGSSH-STD-001 from the editor: verdict, fix queue and what could not be checked in the sidebar, a report panel, and fix prompts to hand to Copilot or Claude.",
+  "version": "0.1.1",
+  "publisher": "fabriziosalmi",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/fabriziosalmi/agssh.git",
+    "directory": "editors/vscode"
+  },
+  "bugs": {
+    "url": "https://github.com/fabriziosalmi/agssh/issues"
+  },
+  "homepage": "https://agssh.dev/",
+  "engines": {
+    "vscode": "^1.85.0",
+    "node": ">=18"
+  },
+  "categories": [
+    "Linters",
+    "Other"
+  ],
+  "keywords": [
+    "security",
+    "csp",
+    "privacy",
+    "static site",
+    "conformance",
+    "mcp"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "agssh runs a local binary configured in settings."
+    },
+    "virtualWorkspaces": false
+  },
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "workspaceContains:**/.airgap.yml"
+  ],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "agssh",
+          "title": "agssh",
+          "icon": "media/agssh.svg"
+        }
+      ]
+    },
+    "views": {
+      "agssh": [
+        {
+          "id": "agssh.results",
+          "name": "Results"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "agssh.results",
+        "contents": "No scan yet.\n[Scan a URL](command:agssh.scanUrl)\n[Scan .airgap.yml](command:agssh.scanConfig)\nThe dynamic checks need Chrome or Chromium; agssh finds it on its own or through AGSSH_CHROME."
+      }
+    ],
+    "commands": [
+      {
+        "command": "agssh.scanUrl",
+        "title": "Scan URL...",
+        "category": "agssh",
+        "icon": "$(globe)"
+      },
+      {
+        "command": "agssh.scanConfig",
+        "title": "Scan .airgap.yml",
+        "category": "agssh",
+        "icon": "$(file-code)"
+      },
+      {
+        "command": "agssh.rescan",
+        "title": "Rescan",
+        "category": "agssh",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "agssh.openReport",
+        "title": "Open Report",
+        "category": "agssh",
+        "icon": "$(preview)"
+      },
+      {
+        "command": "agssh.copyReportPrompt",
+        "title": "Copy Fix Prompt for the Whole Report",
+        "category": "agssh",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "agssh.copyFixPrompt",
+        "title": "Copy Fix Prompt for AI",
+        "category": "agssh",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "agssh.showRule",
+        "title": "Show Rule Text",
+        "category": "agssh",
+        "icon": "$(book)"
+      },
+      {
+        "command": "agssh.showOutput",
+        "title": "Show Output",
+        "category": "agssh",
+        "icon": "$(output)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        { "command": "agssh.scanUrl", "when": "view == agssh.results", "group": "navigation@1" },
+        { "command": "agssh.scanConfig", "when": "view == agssh.results", "group": "navigation@2" },
+        { "command": "agssh.rescan", "when": "view == agssh.results && agssh.hasScan", "group": "navigation@3" },
+        { "command": "agssh.openReport", "when": "view == agssh.results && agssh.hasScan", "group": "navigation@4" },
+        { "command": "agssh.copyReportPrompt", "when": "view == agssh.results && agssh.hasScan", "group": "1_more@1" },
+        { "command": "agssh.showOutput", "when": "view == agssh.results", "group": "1_more@2" }
+      ],
+      "view/item/context": [
+        { "command": "agssh.copyFixPrompt", "when": "view == agssh.results && viewItem =~ /^(finding|unassessed)$/", "group": "inline@1" },
+        { "command": "agssh.showRule", "when": "view == agssh.results && viewItem =~ /^(finding|unassessed|passed)$/", "group": "inline@2" }
+      ],
+      "commandPalette": [
+        { "command": "agssh.copyFixPrompt", "when": "false" },
+        { "command": "agssh.showRule", "when": "false" },
+        { "command": "agssh.rescan", "when": "agssh.hasScan" },
+        { "command": "agssh.openReport", "when": "agssh.hasScan" },
+        { "command": "agssh.copyReportPrompt", "when": "agssh.hasScan" }
+      ]
+    },
+    "configuration": {
+      "title": "agssh",
+      "properties": {
+        "agssh.binaryPath": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "Path to the `agssh` binary. Empty: look in `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, `~/go/bin`, then `PATH`."
+        },
+        "agssh.profile": {
+          "type": "string",
+          "enum": ["Bronze", "Silver", "Gold"],
+          "default": "Bronze",
+          "description": "Target profile for Scan URL. Scan .airgap.yml uses the profile declared in the file."
+        },
+        "agssh.level": {
+          "type": "string",
+          "enum": ["L0", "L1", "L2"],
+          "default": "L0",
+          "description": "Strictness level for Scan URL. Scan .airgap.yml uses the level declared in the file."
+        },
+        "agssh.timeoutSeconds": {
+          "type": "number",
+          "default": 45,
+          "minimum": 5,
+          "description": "Per-check timeout passed to agssh (-timeout)."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "test": "tsc -p ./ && node --test out/test/",
+    "package": "vsce package --no-dependencies",
+    "vscode:prepublish": "tsc -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "18.19.130",
+    "@types/vscode": "1.85.0",
+    "@vscode/vsce": "3.6.2",
+    "typescript": "5.6.3"
+  }
+}
