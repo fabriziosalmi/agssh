@@ -1,7 +1,9 @@
 // Command agssh-mcp serves the AGSSH-STD-001 runner over the Model Context
 // Protocol on stdio. It exposes agssh_scan (evaluate a live URL), agssh_scan_config
 // (evaluate an existing .airgap.yml with full repo/CI/supply-chain scope), and
-// agssh_list_rules (registry introspection). Register it with an MCP client, e.g.:
+// agssh_list_rules (registry introspection); the read-only resources
+// agssh://standard, agssh://rules and agssh://rules/{id}; and the
+// agssh_scan_and_fix prompt. Register it with an MCP client, e.g.:
 //
 //	claude mcp add agssh -- agssh-mcp
 package main

@@ -29,7 +29,9 @@ cd standard && python build_pdf.py
 ```
 
 CI fails if `manifest.yaml` drifts from the generator (`skew_test.go` and a CI step
-both enforce this).
+both enforce this). The same run writes [`internal/rules/spec.json`](internal/rules/spec.json),
+the per-rule why / check / fix / tool text the MCP server serves as `agssh://rules/{id}`;
+never hand-edit it either (`spec_test.go` and the same CI step guard it).
 
 ## Pull requests
 

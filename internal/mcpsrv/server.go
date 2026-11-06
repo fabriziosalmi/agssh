@@ -26,7 +26,8 @@ import (
 
 const defaultTimeout = 45 * time.Second
 
-// New builds an MCP server with the AGSSH tool surface registered. The caller
+// New builds an MCP server with the AGSSH tool surface, the read-only rule
+// resources (resources.go) and the scan-and-fix prompt (prompts.go) registered. The caller
 // connects it to a transport (StdioTransport in the binary, an in-memory
 // transport in tests).
 func New(version string) *mcp.Server {
@@ -71,6 +72,8 @@ func New(version string) *mcp.Server {
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
 	}, handleListRules)
 
+	registerResources(s)
+	registerPrompts(s)
 	return s
 }
 

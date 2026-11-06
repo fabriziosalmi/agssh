@@ -561,9 +561,7 @@ FRONT = """
 <h3>Conformance is binary — within a declared profile</h3>
 <p>Burden must match value, so the rules are partitioned into three cumulative profiles. A surface declares its <b>target profile</b> in <code>.airgap.yml</code>; the gate enforces exactly that profile's subset. A surface is <b>conformant at its target profile</b> iff every MUST in that subset passes and every SHOULD passes or carries a governed deviation. A single failed MUST = non-conformant; the weighted score (§12) only orders remediation.</p>
 <table class="grid"><thead><tr><th>Profile</th><th>For</th><th>Adds</th></tr></thead><tbody>
-<tr><td><b>Bronze</b> — Baseline</td><td>any static surface (docs, small tools); an afternoon's work, no CI/signing</td><td>egress boundary, CSP lockdown + anti-framing property, core security headers, no secrets in output, no known-CVE deps, no pre-consent telemetry, self-hosted fonts, in-browser-only output</td></tr>
-<tr><td><b>Silver</b> — Hardened</td><td>tools handling user data or commercially deployed</td><td>supply-chain integrity, CI hardening, DNS trust anchors, TLS floor, remaining headers/privacy, the egress canary, waiver budget &amp; auto-expiry</td></tr>
-<tr><td><b>Gold</b> — Sovereign</td><td>high-assurance / regulated / sovereign-cloud</td><td>release signing &amp; provenance, Trusted Types everywhere, cross-origin isolation, external signed attestation, ephemeral hermetic build, segregation-of-duties waivers</td></tr>
+__PROFILE_ROWS__
 </tbody></table>
 <p class="note">Profiles are cumulative: Gold &#8835; Silver &#8835; Bronze. Each rule below is tagged with the lowest profile that requires it.</p>
 
@@ -577,7 +575,30 @@ FRONT = """
 <p>Rigidity that exhausts teams gets bypassed, so the standard mandates the labor-saving automation alongside the control: a bot keeps pinned Action SHAs current (AG-CI-01) so no one edits 40-character hashes by hand; CSP is staged report-only before enforcing (AG-CSP-04); and a conformant starter (the <code>_headers</code>, <code>.airgap.yml</code> and CI gate) ships green by default, making conformance the path of least resistance rather than an obstacle.</p>
 <p class="note">Public, vendor-neutral standard; §10 governs conformance integrity and §11 maps controls to backends. Legal references in Appendix&nbsp;E are informative, not legal advice.</p>
 """
-FRONT = FRONT.replace("__DOC_VER__", DOC_VER)
+# Profiles and levels are data, not prose: the PDF tables below and the runner's
+# embedded spec (internal/rules/spec.json, served by the MCP server) render from
+# the same rows. Fields: (name, label, for, adds) / (name, label, meaning,
+# defining control, typical surface). Cell text is HTML, as in the rule texts.
+PROFILE_ROWS = [
+ ("Bronze","Baseline","any static surface (docs, small tools); an afternoon's work, no CI/signing",
+  "egress boundary, CSP lockdown + anti-framing property, core security headers, no secrets in output, no known-CVE deps, no pre-consent telemetry, self-hosted fonts, in-browser-only output"),
+ ("Silver","Hardened","tools handling user data or commercially deployed",
+  "supply-chain integrity, CI hardening, DNS trust anchors, TLS floor, remaining headers/privacy, the egress canary, waiver budget &amp; auto-expiry"),
+ ("Gold","Sovereign","high-assurance / regulated / sovereign-cloud",
+  "release signing &amp; provenance, Trusted Types everywhere, cross-origin isolation, external signed attestation, ephemeral hermetic build, segregation-of-duties waivers"),
+]
+LEVEL_ROWS = [
+ ("L0","Air-Gapped Strict","Client-side tool with no legitimate network need",
+  "<code>connect-src 'none'</code>, egress set ⊆ {self}","in-browser TLS / image / PDF utilities"),
+ ("L1","Scoped Egress","Needs the network, but only to known origins",
+  "<code>connect-src</code> = explicit allowlist (never <code>*</code>)","agent talking to a local LLM or one API"),
+ ("L2","Public Static","May include third parties, all non-essential gated",
+  "no pre-consent egress; trackers behind consent","product / docs / marketing site"),
+]
+FRONT = FRONT.replace("__DOC_VER__", DOC_VER).replace("__PROFILE_ROWS__", "\n".join(
+    "<tr><td><b>%s</b> — %s</td><td>%s</td><td>%s</td></tr>" % row for row in PROFILE_ROWS))
+LEVEL_TABLE_ROWS = "\n".join(
+    "<tr><td><b>%s</b> — %s</td><td>%s</td><td>%s</td><td>%s</td></tr>" % row for row in LEVEL_ROWS)
 
 APP_TOOL = """
 <h2>Appendix D &nbsp;Tooling Reference <span class="pfx">by check family</span></h2>
@@ -720,9 +741,7 @@ table.grid tr:nth-child(even) td {{ background:#f8fafc; }}
 <p><b>Threat model.</b> A passive network observer; a compromised or hostile third-party CDN serving the code that touches the document; a hostile embedder (clickjacking); a compromised build pipeline or dependency; data exfiltration through any third-party request; subdomain takeover; and regulatory exposure created by pre-consent third-party calls. Every rule composes into a deterministic conformance gate — the &ldquo;deterministic labyrinth&rdquo;: scan &rarr; per-rule pass/fail &rarr; weighted score &rarr; fix queue &rarr; retained evidence.</p>
 <h3>Conformance levels</h3>
 <table class="grid"><thead><tr><th>Level</th><th>Meaning</th><th>Defining control</th><th>Typical surface</th></tr></thead><tbody>
-<tr><td><b>L0</b> — Air-Gapped Strict</td><td>Client-side tool with no legitimate network need</td><td><code>connect-src 'none'</code>, egress set ⊆ {{self}}</td><td>in-browser TLS / image / PDF utilities</td></tr>
-<tr><td><b>L1</b> — Scoped Egress</td><td>Needs the network, but only to known origins</td><td><code>connect-src</code> = explicit allowlist (never <code>*</code>)</td><td>agent talking to a local LLM or one API</td></tr>
-<tr><td><b>L2</b> — Public Static</td><td>May include third parties, all non-essential gated</td><td>no pre-consent egress; trackers behind consent</td><td>product / docs / marketing site</td></tr>
+{LEVEL_TABLE_ROWS}
 </tbody></table>
 
 {sections_html}
@@ -849,6 +868,36 @@ with open(version_go_path, "w") as vf:
              "// runner implements, derived from the newest CHANGELOG.md release heading.\n"
              "const StandardVersion = \"" + DOC_VER + "\"\n")
 print("version:", DOC_VER, "->", os.path.relpath(version_go_path, _here))
+
+# --- embedded spec text: the per-rule why / check / fix / tool, the profile and
+# level tables and the family titles, as plain text. The runner embeds this file
+# (internal/rules/spec.go, go:embed) and the MCP server serves it as resources, so
+# a model reads the standard's own words, never a paraphrase. CI diffs it like the
+# manifest; internal/rules/spec_test.go asserts it covers exactly the registry.
+import json as _json
+def _plain(s):
+    s = re.sub(r"</?code>", "`", s)
+    s = re.sub(r"<[^>]+>", "", s)
+    return html.unescape(s)
+_spec = {
+    "id": DOC_ID,
+    "title": _plain(DOC_TITLE),
+    "version": DOC_VER,
+    "date": DOC_DATE,
+    "profiles": [dict(name=n, label=lb, **{"for": _plain(fo)}, adds=_plain(ad))
+                 for (n, lb, fo, ad) in PROFILE_ROWS],
+    "levels": [dict(name=n, label=lb, meaning=_plain(me), control=_plain(co), typical=_plain(ty))
+               for (n, lb, me, co, ty) in LEVEL_ROWS],
+    "families": [dict(section=_plain(num), prefix=prefix, title=_plain(title), rules=[
+        dict(id=r["id"], title=_plain(r["title"]), applies=_plain(r["applies"]),
+             check_type=r["ct"], why=_plain(r["why"]), check=_plain(r["check"]),
+             fix=_plain(r["fix"]), tool=_plain(r.get("tool", "")))
+        for r in rs]) for (num, title, prefix, rs) in RULES],
+}
+spec_path = os.path.join(_here, "..", "internal", "rules", "spec.json")
+with open(spec_path, "w", encoding="utf-8") as sf:
+    sf.write(_json.dumps(_spec, ensure_ascii=False, indent=1) + "\n")
+print("spec:", n_rules, "rules ->", os.path.relpath(spec_path, _here))
 
 # --- browsable Markdown rule reference (repo-root RULES.md), generated from the
 # SAME RULES source as the PDF and the manifest so the three cannot drift. CI

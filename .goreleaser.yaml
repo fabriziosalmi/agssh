@@ -89,6 +89,7 @@ brews:
       Agents:  claude mcp add agssh -- agssh-mcp
     test: |
       system "#{bin}/agssh", "-version"
+      system "#{bin}/agssh-mcp", "-version"
 
 release:
   draft: false
