@@ -36,7 +36,7 @@ func All() []Rule {
 		{"AG-HDR-04", "Referrer-Policy", "AG-HDR", Must, Medium, S, PlaneStatic, always, chkReferrer},
 		{"AG-HDR-05", "Permissions-Policy", "AG-HDR", Must, Medium, S, PlaneStatic, always, chkPermissionsPolicy},
 		{"AG-HDR-06", "Cross-origin isolation for threaded WASM", "AG-HDR", Must, Medium, G, PlaneStatic, ifThreadedWASM, chkCOIso},
-		{"AG-HDR-07", "Cache discipline for fingerprinted assets", "AG-HDR", Should, Low, S, PlaneStatic, always, todo("per-asset Cache-Control inspection")},
+		{"AG-HDR-07", "Cache discipline for fingerprinted assets", "AG-HDR", Should, Low, S, PlaneStatic, always, chkCacheDiscipline},
 		{"AG-HDR-08", "TLS floor", "AG-HDR", Must, High, S, PlaneTLS, always, chkTLSFloor},
 
 		// ---- §5 AG-DNS — DNS Trust Anchors ----
