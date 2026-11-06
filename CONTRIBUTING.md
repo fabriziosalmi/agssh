@@ -6,7 +6,7 @@ single-sourced are very welcome.
 
 ## Prerequisites
 
-- Go (see [`go.mod`](go.mod) for the exact version — CI uses `go-version-file`).
+- Go (see [`go.mod`](go.mod) for the exact version; CI uses `go-version-file`).
 - For regenerating the standard: `python3` with `pip install weasyprint`.
 
 ## Build, test, lint

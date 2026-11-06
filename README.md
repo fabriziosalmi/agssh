@@ -21,7 +21,7 @@ shipping static or client-side surfaces where privacy and supply-chain integrity
 Point it at a live URL and read the verdict; no config file, no build step:
 
 ```bash
-brew install fabriziosalmi/agssh/agssh        # or: go install github.com/fabriziosalmi/agssh/cmd/agssh@latest
+go install github.com/fabriziosalmi/agssh/cmd/agssh@latest   # or a release archive, see below
 agssh scan https://your-surface.example/
 agssh scan -profile Silver -level L1 -allow-connect https://api.example.com https://your-surface.example/
 agssh scan -json https://your-surface.example/ | jq '.score.pct'   # machine-readable; summary on stderr
@@ -32,29 +32,35 @@ agssh scan -json https://your-surface.example/ | jq '.score.pct'   # machine-rea
 straight into a shell script or CI step. Source-plane rules (secrets, vulnerable
 deps, SBOM, CI) stay `INCONCLUSIVE` unless you add `-repo`, `-dist`, `-workflows`.
 For a declared, versioned manifest use `agssh -config .airgap.yml` instead (below).
-No Go and no Homebrew? Use the Action or the `ghcr.io/fabriziosalmi/agssh` image:
+No Go? Every [release](https://github.com/fabriziosalmi/agssh/releases) ships prebuilt
+`agssh` and `agssh-mcp` binaries, or use the Action or the `ghcr.io/fabriziosalmi/agssh` image:
 `docker run --rm ghcr.io/fabriziosalmi/agssh scan https://your-surface.example/`.
 
 You get a verdict, then a severity-ranked queue of what to fix and, kept separate,
-what could not be checked (fail-closed, never a silent pass):
+what could not be checked (fail-closed, never a silent pass). A real run, trimmed:
 
 ```text
 AGSSH-STD-001 v1.8.1 — https://example.com/ @ Bronze/L0
-Verdict: NON-CONFORMANT   Score: 42/86 (49%)
-Rules: 7 PASS · 8 FAIL · 1 INCONCLUSIVE · 0 waived · 0 N/A
+Verdict: NON-CONFORMANT   Score: 38/86 (44%)   Deviation debt: 0
+Rules: 6 PASS · 8 FAIL · 2 INCONCLUSIVE · 0 waived · 0 N/A
+Score scope: 16 rules scored at L0 — level-relative, not comparable across levels
 
 Fix queue (FAIL only, highest severity first):
   [CRITICAL] AG-NET-01 Self-host every runtime dependency
          observed: no CSP; fetch-directives fall back to the browser's wildcard-open defaults
          expected: a CSP locking every fetch-directive to 'self'/'none'
-  [HIGH]     AG-CSP-01 Ship a CSP
-         observed: no Content-Security-Policy
-  … 6 more …
-Could not assess (1 — unverified, fail-closed; supply what's missing):
-  AG-SUP-04 No secrets in shipped output   (gitleaks not on PATH)
+  [CRITICAL] AG-NET-04 Constrain connect-src
+         observed: connect-src admits: connect-src unset and no default-src
+         expected: connect-src 'none' or declared allow-list only
+  ...
+Could not assess (2 — unverified, fail-closed; supply what's missing):
+  AG-SUP-04 No secrets in shipped output
+         reason: no dist/repo directory to scan for secrets
+  AG-SUP-06 No known-vulnerable dependencies
+         reason: no repository directory to scan for known vulnerabilities
 ```
 
-Or drop the conformant-by-default manifest into your repo and gate every push:
+Or commit a manifest (`.airgap.yml`) to your repo and gate every push:
 
 ```yaml
 # .github/workflows/conformance.yml
@@ -73,18 +79,18 @@ Four ways in (CLI, Action, container, MCP), one idea: **nothing is green unless 
 
 ## The standard
 
-<!-- agssh:std-headline -->[`standard/AGSSH-STD-001-v1.8.1.pdf`](./standard/AGSSH-STD-001-v1.8.1.pdf) — 57 rules across 9 families<!-- /agssh:std-headline -->,
+<!-- agssh:std-headline -->[`standard/AGSSH-STD-001-v1.8.1.pdf`](./standard/AGSSH-STD-001-v1.8.1.pdf): 57 rules across 9 families<!-- /agssh:std-headline -->,
 browsable as [**`RULES.md`**](RULES.md). The rules live as structured data in
 [`standard/build_pdf.py`](standard/build_pdf.py), which emits the PDF, `RULES.md`,
-**and** the runner's rule manifest from one source — so the document and the runner
-cannot drift.
+**and** the runner's rule manifest from one source, and CI fails if any generated
+file drifts from it.
 
 |  | |
 |---|---|
 | **9 families** | egress (`AG-NET`), CSP (`AG-CSP`), headers (`AG-HDR`), DNS (`AG-DNS`), supply-chain (`AG-SUP`), CI (`AG-CI`), privacy (`AG-PRV`), output (`AG-OUT`), governance (`AG-GOV`) |
-| **3 cumulative profiles** | **Bronze ⊂ Silver ⊂ Gold** — raise the target as the surface's value grows |
+| **3 cumulative profiles** | **Bronze ⊂ Silver ⊂ Gold**: raise the target as the surface's value grows |
 | **3 strictness levels** | **L0** strict air-gap · **L1** scoped egress · **L2** marketing |
-| **Assurance tiers** | header → meta → runtime → structural — how strong the evidence is, not just whether a box is ticked |
+| **Assurance tiers** | A header, B meta, C runtime, D structural: how strong the evidence is, not just whether a box is ticked |
 
 Full normative text (*why · check · fix · tool* per rule) is in the PDF; the
 one-line-per-rule index is [`RULES.md`](RULES.md).
@@ -92,17 +98,17 @@ one-line-per-rule index is [`RULES.md`](RULES.md).
 ## The runner
 
 A single static Go binary. Native DNS (`miekg/dns`) and TLS probing (`crypto/tls`
-plus a raw TLS-1.0 `ClientHello` for legacy-refusal) — no `dig`/`testssl`; headless
+plus a raw TLS-1.0 `ClientHello` for legacy-refusal), no `dig`/`testssl`; headless
 verification via `chromedp` (no Node); signing via `cosign`.
 
 ### Posture: fail-closed
 
 A rule the runner cannot conclusively verify returns `INCONCLUSIVE`, and the gate
-treats that exactly like `FAIL`. Nothing is green unless proven — a missing scanner
+treats that exactly like `FAIL`. Nothing is green unless proven: a missing scanner
 or a check not implemented in this build both block. The gate fails on **any**
 failing MUST, **any** unwaived failing SHOULD, or **any** governance violation. A
 surface whose live deployment **cannot be fetched at all** is reported as
-`UNSCANNABLE` (with the transport cause) and emits no verdict, score, or badge — an
+`UNSCANNABLE` (with the transport cause) and emits no verdict, score, or badge, so an
 unreachable host can never masquerade as a low score.
 
 **Exit codes:** `0` conformant · `1` non-conformant · `2` usage/internal error ·
@@ -112,20 +118,20 @@ unreachable host can never masquerade as a low score.
 
 | Plane | How | Needs |
 |---|---|---|
-| static | live headers + HTML + CSP parse | — |
-| dns | `miekg/dns` against a validating resolver | — |
-| tls | raw-socket TLS-1.0 `ClientHello` (legacy refusal) + `crypto/tls` modern handshake | — |
-| dynamic | headless Chromium: offline proof, pre-consent egress, egress canary | a browser |
+| static | live headers + HTML + CSP parse | nothing |
+| dns | `miekg/dns` against a validating resolver | nothing |
+| tls | raw-socket TLS-1.0 `ClientHello` (legacy refusal) + `crypto/tls` modern handshake | nothing |
+| dynamic | headless Chromium: offline proof, pre-consent egress, egress canary | Chrome or Chromium (found automatically, or `AGSSH_CHROME`) |
 | supply | `gitleaks`, `osv-scanner`; source-map / SBOM scans | scanners on `PATH` |
-| ci | workflow static analysis (pinning, permissions, untrusted code) | — |
+| ci | workflow static analysis (pinning, permissions, untrusted code) | nothing |
 | engine | waiver governance, signing, hermetic-build hints | `cosign` (Gold) |
 
 All <!-- agssh:n-rules -->57<!-- /agssh:n-rules --> rules are registered with full metadata; implemented checkers span
 every plane, including branch protection via the GitHub API (AG-CI-05) and runtime
 service-worker / client-storage inspection (AG-NET-07 / AG-PRV-04). A handful of
-rules whose verification is process-specific or not yet automated in this build —
-reproducible-build comparison, deterministic-output diffing, report-only rollout
-history — are registered `INCONCLUSIVE` with the exact approach to wire in: they
+rules whose verification is process-specific or not yet automated in this build
+(reproducible-build comparison, deterministic-output diffing, report-only rollout
+history) are registered `INCONCLUSIVE` with the exact approach to wire in: they
 block until proven, and each is a single `Checker` in `internal/rules`.
 
 ### Build & run
@@ -141,22 +147,22 @@ Flags: `-config -repo -dist -workflows -out -profile -level -sign -artifact -aut
 
 The output splits what you must fix from what could not be checked: a **Fix queue**
 (FAIL only, severity-ranked) and a **Could not assess** list (INCONCLUSIVE, with the
-reason). A degraded environment — no headless browser, a missing scanner — is called
+reason). A degraded environment (no headless browser, a missing scanner) is called
 out at the top, so a partial scan never looks as confident as a complete one.
 
 ## Conformance badge
 
-`-badge out.svg` emits a **self-hosted** SVG badge — no web font, no external image,
-no third-party endpoint — so a project can serve it from its own origin without
+`-badge out.svg` emits a **self-hosted** SVG badge (no web font, no external image,
+no third-party endpoint), so a project can serve it from its own origin without
 breaking its own `AG-NET-02`. It is a deterministic, pure function of the record:
 
 - **conformant** → the earned tier as its metal (`AGSSH · Gold`), a fail-closed
   claim that reproduces from the same record;
 - **non-conformant** → the grey *target* tier plus the weighted score
-  (`AGSSH · Gold · 41%`) — the gap, shown for what it is.
+  (`AGSSH · Gold · 41%`): the gap, shown for what it is.
 
 The score is a development diagnostic (an `INCONCLUSIVE` is environment-sensitive and
-fail-closed) and is **level-relative** — a ratio over the rules in scope at the
+fail-closed) and is **level-relative**: a ratio over the rules in scope at the
 declared level, not comparable across levels. Compare medals, not numbers; the
 **medal is the claim.**
 
@@ -186,7 +192,7 @@ can be tracked and only alerts when it gets *worse*.
 
 `agssh-mcp` exposes the same engine over the [Model Context Protocol](https://modelcontextprotocol.io)
 on stdio, so an agent can scan a surface without the build/config/parse dance. It
-reuses the runner in-process — no shell-out, no temp files.
+reuses the runner in-process: no shell-out, no temp files.
 
 Install it without Go from a release: every archive on the
 [releases page](https://github.com/fabriziosalmi/agssh/releases) ships `agssh-mcp`
@@ -255,13 +261,13 @@ MUSTs are never waivable (AG-GOV-01); the runner enforces expiry against its own
 clock (AG-GOV-02); a per-surface debt ceiling caps active waivers (AG-GOV-03); at
 Gold each waiver is signed by an approver distinct from the author (AG-GOV-04). A
 valid waiver only ever suppresses a **SHOULD** failure. Truthfulness of a
-justification stays a human decision — the runner governs the mechanics only.
+justification stays a human decision; the runner governs the mechanics only.
 
 ## Repository layout
 
 ```text
 standard/   the standard itself: rendered PDF + the canonical generator (build_pdf.py)
-RULES.md    browsable index of all 57 rules (generated — never drifts)
+RULES.md    browsable index of all 57 rules (generated, checked for drift in CI)
 cmd/        the agssh CLI and agssh-mcp (MCP server)
 internal/   runner internals (manifest, csp, rules, engine, report, mcpsrv, badge)
 action.yml  GitHub Action wrapper       Dockerfile  runtime image (Chromium + cosign)
@@ -278,6 +284,6 @@ fail-closed invariant, and [`SECURITY.md`](SECURITY.md) to report a vulnerabilit
 
 ## License
 
-[Apache License 2.0](LICENSE) — permissive, with an explicit patent grant. The runner
+[Apache License 2.0](LICENSE): permissive, with an explicit patent grant. The runner
 and its checkers compose freely into any pipeline, and AGSSH-STD-001 stays openly
 implementable.
