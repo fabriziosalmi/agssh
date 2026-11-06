@@ -1,0 +1,684 @@
+{
+ "id": "AGSSH-STD-001",
+ "title": "Air-Gapped Static Surface Hardening",
+ "version": "v1.8.1",
+ "date": "November 2026",
+ "profiles": [
+  {
+   "name": "Bronze",
+   "label": "Baseline",
+   "for": "any static surface (docs, small tools); an afternoon's work, no CI/signing",
+   "adds": "egress boundary, CSP lockdown + anti-framing property, core security headers, no secrets in output, no known-CVE deps, no pre-consent telemetry, self-hosted fonts, in-browser-only output"
+  },
+  {
+   "name": "Silver",
+   "label": "Hardened",
+   "for": "tools handling user data or commercially deployed",
+   "adds": "supply-chain integrity, CI hardening, DNS trust anchors, TLS floor, remaining headers/privacy, the egress canary, waiver budget & auto-expiry"
+  },
+  {
+   "name": "Gold",
+   "label": "Sovereign",
+   "for": "high-assurance / regulated / sovereign-cloud",
+   "adds": "release signing & provenance, Trusted Types everywhere, cross-origin isolation, external signed attestation, ephemeral hermetic build, segregation-of-duties waivers"
+  }
+ ],
+ "levels": [
+  {
+   "name": "L0",
+   "label": "Air-Gapped Strict",
+   "meaning": "Client-side tool with no legitimate network need",
+   "control": "`connect-src 'none'`, egress set ⊆ {self}",
+   "typical": "in-browser TLS / image / PDF utilities"
+  },
+  {
+   "name": "L1",
+   "label": "Scoped Egress",
+   "meaning": "Needs the network, but only to known origins",
+   "control": "`connect-src` = explicit allowlist (never `*`)",
+   "typical": "agent talking to a local LLM or one API"
+  },
+  {
+   "name": "L2",
+   "label": "Public Static",
+   "meaning": "May include third parties, all non-essential gated",
+   "control": "no pre-consent egress; trackers behind consent",
+   "typical": "product / docs / marketing site"
+  }
+ ],
+ "families": [
+  {
+   "section": "§2",
+   "prefix": "AG-NET",
+   "title": "Egress & Air-Gap",
+   "rules": [
+    {
+     "id": "AG-NET-01",
+     "title": "Self-host every runtime dependency",
+     "applies": "MUST · L0 L1 L2",
+     "check_type": "static+dynamic",
+     "why": "The third-party egress set of a surface is the UNION of every host it can reach: all CSP fetch-directive sources (script/style/img/font/media/connect/worker/frame/manifest/prefetch-src) plus every runtime sink (fetch, XHR, sendBeacon, EventSource, WebSocket, new Worker, importScripts, WebAssembly.instantiate*, dynamic import). For L0 that set MUST be a subset of {self}. The canonical breach is a browser OCR/codec engine fetched from a CDN on use — the document stays local, the engine does not.",
+     "check": "egress = union(all CSP fetch-dir hosts, all runtime request hosts)\nassert egress ⊆ {self}      # not connect-src alone — the whole set",
+     "fix": "Vendor all assets same-origin; ship the .wasm, workers and data packs from your own origin.",
+     "tool": "chromedp request capture + CSP parser"
+    },
+    {
+     "id": "AG-NET-02",
+     "title": "Override library default CDN loaders",
+     "applies": "MUST · L0 L1 L2",
+     "check_type": "static",
+     "why": "Tesseract.js (workerPath/corePath/langPath → jsDelivr + the tessdata host), jsPDF (the pdfobject viewer → cdnjs), pdf.js workers and ML model loaders all fetch from a CDN by default unless explicitly repointed. The default is invisible egress that CSP-less testing never reveals until it fires.",
+     "check": "grep dist: jsdelivr|unpkg|cdnjs|tessdata|projectnaptha => 0 hits\nassert every loader path (workerPath/corePath/langPath/…) is same-origin",
+     "fix": "Pass explicit same-origin paths to every loader; treat a surviving default-CDN literal as a build failure.",
+     "tool": "ripgrep over dist/"
+    },
+    {
+     "id": "AG-NET-03",
+     "title": "Same-origin workers; constrain worker-src",
+     "applies": "MUST · L0 L1 L2",
+     "check_type": "static",
+     "why": "A Blob worker doing importScripts('https://cdn…'), or a cross-origin module worker, re-introduces code that SRI cannot cover (there is no integrity for importScripts or module workers).",
+     "check": "every importScripts(/new Worker( arg resolves same-origin ;\nCSP: worker-src 'self' ; child-src 'none'",
+     "fix": "Bundle workers locally; point any library workerPath at a same-origin file.",
+     "tool": "AST/regex scan + CSP parser"
+    },
+    {
+     "id": "AG-NET-04",
+     "title": "Constrain connect-src",
+     "applies": "MUST · L0 L1   (conditional · L2)",
+     "check_type": "static",
+     "why": "The browser-enforced air-gap for XHR/fetch/WebSocket. connect-src 'none' makes that exfiltration channel impossible regardless of any bug or injection. Tools that genuinely need the network declare an explicit allowlist of exact origins — never '*', never a bare scheme.",
+     "check": "parse CSP connect-src:\n  L0 => exactly 'none' ; L1 => literal-origin allowlist (no '*'/https:)\n  L2 => must exclude every unconsented tracker host",
+     "fix": "Set connect-src 'none' for pure client-side tools; for an agent talking to a local LLM scope to that exact origin only.",
+     "tool": "CSP parser"
+    },
+    {
+     "id": "AG-NET-05",
+     "title": "No third-party egress during load",
+     "applies": "MUST · L0   (SHOULD · L1)",
+     "check_type": "dynamic",
+     "why": "The air-gap claim must be observable, not asserted. A headless load of the surface must contact NO third-party host: every responding origin is the surface's own. This is the necessary, directly-measurable half of 'works offline' — the network is observed during a normal load, not cut, so it proves no cross-origin dependency fired, not that a full offline smoke test passed.",
+     "check": "headless load; assert every responding host is same-origin\n(zero third-party responses observed during the load)",
+     "fix": "Eliminate cross-origin subresources and runtime calls (AG-NET-01/02/04); serve every asset and data pack from your own origin.",
+     "tool": "chromedp request/response capture"
+    },
+    {
+     "id": "AG-NET-06",
+     "title": "No third-party connection priming",
+     "applies": "MUST · L0 L1   (SHOULD · L2)",
+     "check_type": "static",
+     "why": "preconnect/dns-prefetch/prefetch to third parties leak intent and warm tracker connections before the visitor interacts at all.",
+     "check": "all rel in {preconnect,dns-prefetch,preload,prefetch,modulepreload}\nhosts ⊆ {self}",
+     "fix": "Remove off-origin resource hints; keep only self-targeted preloads.",
+     "tool": "HTML parser"
+    },
+    {
+     "id": "AG-NET-07",
+     "title": "Service Worker hygiene",
+     "applies": "MUST · when a service worker is registered",
+     "check_type": "dynamic",
+     "why": "A service worker is persistent code that intercepts every request and can cache and replay responses. A compromised or over-scoped SW is a durable foothold that survives page reloads.",
+     "check": "SW served same-origin ; narrowest scope ; fetch handlers contact\nonly self ; no remote importScripts ; cache stores only same-origin",
+     "fix": "Register the narrowest scope; never importScripts a remote URL; restrict the cache to same-origin responses.",
+     "tool": "chromedp SW inspection"
+    },
+    {
+     "id": "AG-NET-08",
+     "title": "Violation/error reporting stays same-origin",
+     "applies": "MUST · L0 L1",
+     "check_type": "static",
+     "why": "CSP report-to / Reporting-Endpoints / NEL pointed at a third-party SaaS collector silently re-introduces egress and ships metadata about every visitor and violation off-origin — defeating the air-gap through the back door.",
+     "check": "Reporting-Endpoints / report-to / NEL targets ⊆ {self}  OR  absent",
+     "fix": "Collect reports at a same-origin endpoint, or disable reporting on air-gapped surfaces.",
+     "tool": "header + CSP parser"
+    },
+    {
+     "id": "AG-NET-09",
+     "title": "External _blank links sever the opener; privacy surfaces sever the referrer",
+     "applies": "MUST · L0 L1 L2",
+     "check_type": "static",
+     "why": "Property: no  exposes window.opener to the destination (reverse tabnabbing). The opener is severed by rel containing 'noopener' OR 'noreferrer' ('noreferrer' implies 'noopener' per the HTML spec). On privacy surfaces the referrer is also suppressed. Browsers now imply noopener for target=_blank by default — treat that as defence-in-depth, not as the control.",
+     "check": "for every : rel contains 'noopener' or 'noreferrer' ;\non privacy surfaces rel also contains 'noreferrer'",
+     "fix": "Add rel=\"noopener noreferrer\" to external _blank links; noreferrer also blocks referrer leakage.",
+     "tool": "HTML anchor scan"
+    }
+   ]
+  },
+  {
+   "section": "§3",
+   "prefix": "AG-CSP",
+   "title": "Content Security Policy",
+   "rules": [
+    {
+     "id": "AG-CSP-01",
+     "title": "Ship a CSP",
+     "applies": "MUST · L0 L1 L2",
+     "check_type": "static",
+     "why": "A CSP is the single highest-leverage control on a static surface. Header-delivered is preferred; a  CSP is the fallback only for backends that cannot set response headers (GitHub Pages).",
+     "check": "response header content-security-policy present\nOR  present (record which)",
+     "fix": "Add the policy at the edge where possible; otherwise emit a meta CSP and accept the AG-CSP-03 limitation.",
+     "tool": "header + HTML parser"
+    },
+    {
+     "id": "AG-CSP-02",
+     "title": "Deny by default; enumerate; forbid bypass primitives",
+     "applies": "MUST · L0 L1 L2",
+     "check_type": "static",
+     "why": "A permissive CSP is theatre. The baseline denies by default, enumerates only what is used, and removes every known bypass primitive.",
+     "check": "default-src 'none'(or 'self'); object-src 'none'; base-uri 'none'|'self';\nexplicit script/style/img/font/connect/worker/frame/manifest-src;\nform-action 'self'|'none'; NO 'unsafe-eval'; NO 'unsafe-inline' on\nscript-src; NO data:/blob: in script-src; NO wildcard or scheme-only;\n'strict-dynamic' only with nonces",
+     "fix": "Hash or nonce inline scripts; delete unsafe-eval / unsafe-inline(script) / wildcards; add the missing fetch directives explicitly.",
+     "tool": "CSP directive-predicate parser"
+    },
+    {
+     "id": "AG-CSP-03",
+     "title": "Clickjacking control must be header-delivered",
+     "applies": "MUST · L0 L1 L2",
+     "check_type": "static",
+     "why": "frame-ancestors, report-uri/report-to and sandbox are IGNORED when a CSP arrives via . A meta-only surface therefore has NO clickjacking protection from frame-ancestors — it must come from an X-Frame-Options header. Where neither header can be set (pure GitHub Pages), the surface MUST be stateless and the residual risk recorded.",
+     "check": "if meta-CSP contains frame-ancestors => FAIL (ineffective)\nrequire X-Frame-Options header  OR  declared stateless: true",
+     "fix": "Move clickjacking control to an XFO header (front with a CDN if the host can't set it), or keep the surface free of auth and state-changing actions.",
+     "tool": "header + CSP parser"
+    },
+    {
+     "id": "AG-CSP-04",
+     "title": "Stage report-only before enforcing",
+     "applies": "SHOULD · all (mandatory before first enforcing deploy)",
+     "check_type": "manual",
+     "why": "A CSP that breaks the surface gets disabled in a panic — worse than none. Report-only first turns breakage into telemetry.",
+     "check": "Content-Security-Policy-Report-Only canary in staging before the\nenforcing policy ships ; violations reviewed",
+     "fix": "Deploy report-only, watch violations, then promote to enforcing.",
+     "tool": "staging header + report log"
+    },
+    {
+     "id": "AG-CSP-05",
+     "title": "Force HTTPS subresources",
+     "applies": "MUST · L0 L1 L2",
+     "check_type": "static",
+     "why": "A single http:// subresource downgrades the whole page's integrity guarantee.",
+     "check": "upgrade-insecure-requests present ; grep subresources 'http://' => 0",
+     "fix": "Add the directive; convert plain-HTTP references to HTTPS or same-origin.",
+     "tool": "CSP parser + HTML scan"
+    },
+    {
+     "id": "AG-CSP-06",
+     "title": "Trusted Types for DOM sinks",
+     "applies": "MUST · L0 L1   (SHOULD · L2)",
+     "check_type": "static+dynamic",
+     "why": "Trusted Types eliminate DOM-XSS by forbidding raw string assignment to injection sinks (innerHTML, script.src, eval). For a tool parsing untrusted input — certificates, uploaded files — this closes the highest-impact client-side bug class outright.",
+     "check": "CSP require-trusted-types-for 'script' ;\ntrusted-types   (no '*'; 'none' if no policy needed)",
+     "fix": "Enable Trusted Types; route any required HTML through one vetted, sanitizer-backed policy.",
+     "tool": "CSP parser + runtime violation check"
+    }
+   ]
+  },
+  {
+   "section": "§4",
+   "prefix": "AG-HDR",
+   "title": "Transport & Response Headers",
+   "rules": [
+    {
+     "id": "AG-HDR-01",
+     "title": "HSTS with a real max-age",
+     "applies": "MUST · header-capable backends",
+     "check_type": "static",
+     "why": "max-age=0 DISABLES HSTS and disqualifies the domain from preload while still looking configured — the most common silent regression: the toggle is on, the value is zero.",
+     "check": "Strict-Transport-Security: max-age >= 31536000; includeSubDomains;\npreload      (max-age  FAIL)",
+     "fix": "Set max-age to one year. On Cloudflare this lives under SSL/TLS → Edge Certificates → HSTS — check the value, not just the switch.",
+     "tool": "header parser"
+    },
+    {
+     "id": "AG-HDR-01a",
+     "title": "HSTS scope is sticky — gate it",
+     "applies": "MUST · before enabling AG-HDR-01",
+     "check_type": "manual",
+     "why": "includeSubDomains + preload apply to every subdomain and are hard to reverse. Enable them before a subdomain is permanently on HTTPS and you can lock yourself out of it.",
+     "check": "enumerate every subdomain => each returns valid HTTPS\n(GitHub Pages: 'Enforce HTTPS' ON) ; record preload submission state",
+     "fix": "Verify all subdomains over HTTPS first, then add includeSubDomains/preload, then submit to the preload list.",
+     "tool": "subdomain enumeration + curl"
+    },
+    {
+     "id": "AG-HDR-02",
+     "title": "Disable MIME sniffing",
+     "applies": "MUST · header-capable",
+     "check_type": "static",
+     "why": "Without nosniff a browser may reinterpret an asset's type and execute content never meant to run.",
+     "check": "X-Content-Type-Options: nosniff",
+     "fix": "Emit the header at the edge / in _headers.",
+     "tool": "header parser"
+    },
+    {
+     "id": "AG-HDR-03",
+     "title": "X-Frame-Options",
+     "applies": "MUST · header-capable (pairs with AG-CSP-03)",
+     "check_type": "static",
+     "why": "The reliable, universally-honored clickjacking control; pairs with header CSP frame-ancestors.",
+     "check": "X-Frame-Options: DENY  (or SAMEORIGIN only if same-origin\nframing is genuinely required)",
+     "fix": "DENY unless the surface is intentionally self-embedded.",
+     "tool": "header parser"
+    },
+    {
+     "id": "AG-HDR-04",
+     "title": "Referrer-Policy",
+     "applies": "MUST · header-capable",
+     "check_type": "static",
+     "why": "Stops the surface from leaking the visited URL to outbound links and resources.",
+     "check": "Referrer-Policy in { no-referrer,\n  strict-origin-when-cross-origin, same-origin }",
+     "fix": "no-referrer for privacy tools; strict-origin-when-cross-origin for marketing.",
+     "tool": "header parser"
+    },
+    {
+     "id": "AG-HDR-05",
+     "title": "Permissions-Policy",
+     "applies": "MUST · header-capable",
+     "check_type": "static",
+     "why": "Affirmatively switches off powerful features the surface never uses, including the FLoC/Topics opt-out.",
+     "check": "Permissions-Policy disables unused features, e.g.: camera=(),\nmicrophone=(), geolocation=(), payment=(), usb=(), interest-cohort=()",
+     "fix": "Default-deny every feature; open only what the tool needs.",
+     "tool": "header parser"
+    },
+    {
+     "id": "AG-HDR-06",
+     "title": "Cross-origin isolation for threaded WASM",
+     "applies": "MUST · when SharedArrayBuffer / threaded WASM is used",
+     "check_type": "conditional",
+     "why": "Threaded/SIMD WASM (e.g. Tesseract with threads) needs SharedArrayBuffer, which requires cross-origin isolation; this also hardens against Spectre-class cross-origin reads.",
+     "check": "if SAB used => Cross-Origin-Opener-Policy: same-origin AND\nCross-Origin-Embedder-Policy: require-corp\n(Cross-Origin-Resource-Policy: same-origin on served assets)",
+     "fix": "Set COOP+COEP at the edge; serve assets with CORP same-origin. Not needed for single-threaded WASM.",
+     "tool": "header parser + runtime crossOriginIsolated check"
+    },
+    {
+     "id": "AG-HDR-07",
+     "title": "Cache discipline for fingerprinted assets",
+     "applies": "SHOULD · header-capable",
+     "check_type": "static",
+     "why": "Content-hashed assets are immutable by construction; HTML must never be long-cached or stale tools linger.",
+     "check": "hashed assets (/_astro/*, fingerprinted) => Cache-Control: public,\nmax-age=31536000, immutable ; HTML => no-cache / short",
+     "fix": "Long-cache hashed bundles, short-cache documents.",
+     "tool": "header parser"
+    },
+    {
+     "id": "AG-HDR-08",
+     "title": "TLS floor",
+     "applies": "MUST · header-capable",
+     "check_type": "dynamic",
+     "why": "A modern header set over a weak TLS channel is a contradiction. The transport must refuse legacy protocols and ciphers.",
+     "check": "min TLS 1.2 (prefer 1.3); no SSLv3/TLS1.0/1.1; no RC4/3DES/EXPORT;\nOCSP stapling; valid chain",
+     "fix": "Set the edge/CDN TLS profile to modern; disable legacy protocols/ciphers; enable stapling.",
+     "tool": "testssl.sh / sslyze"
+    }
+   ]
+  },
+  {
+   "section": "§5",
+   "prefix": "AG-DNS",
+   "title": "DNS & Issuance Trust Anchors",
+   "rules": [
+    {
+     "id": "AG-DNS-01",
+     "title": "CAA pins certificate issuance",
+     "applies": "MUST · L0 L1 L2",
+     "check_type": "static",
+     "why": "Without CAA, any public CA can be induced to issue a certificate for your domain. CAA restricts issuance to the CA(s) you actually use and provides an incident contact.",
+     "check": "dig CAA => issue/issuewild restricted to your ACME CA(s) ; iodef set",
+     "fix": "Publish CAA on the apex (and wildcards) naming your CA(s); add an iodef mailto.",
+     "tool": "dig CAA / DNS API"
+    },
+    {
+     "id": "AG-DNS-02",
+     "title": "DNSSEC enabled",
+     "applies": "SHOULD · L0 L1 L2",
+     "check_type": "static",
+     "why": "DNSSEC prevents forged DNS answers from silently redirecting your domain.",
+     "check": "dig +dnssec shows AD ; DS record present at the registrar",
+     "fix": "Enable DNSSEC at the DNS provider and publish the DS at the registrar.",
+     "tool": "dig +dnssec / delv"
+    },
+    {
+     "id": "AG-DNS-03",
+     "title": "No danglable records (subdomain takeover)",
+     "applies": "MUST · L0 L1 L2",
+     "check_type": "static",
+     "why": "A CNAME to a deprovisioned service — a removed Pages site, an unclaimed bucket — is a hijackable subdomain: a live foothold under your brand. Mixed estates (Pages subdomains + a proxied apex) are the usual culprit.",
+     "check": "every CNAME target resolves to a claimed/active resource ;\nno NXDOMAIN / unclaimed-service takeover fingerprints",
+     "fix": "Remove or repoint stale records the moment a service is decommissioned.",
+     "tool": "dnsReaper / subjack"
+    }
+   ]
+  },
+  {
+   "section": "§6",
+   "prefix": "AG-SUP",
+   "title": "Supply Chain & Build Integrity",
+   "rules": [
+    {
+     "id": "AG-SUP-01",
+     "title": "SRI on any unavoidable cross-origin subresource",
+     "applies": "MUST · L0 L1 L2",
+     "check_type": "static",
+     "why": "Eliminating cross-origin subresources (AG-NET-01) makes this moot — the strongest answer. Where one must remain, integrity pinning stops a compromised CDN swapping the file.",
+     "check": "every cross-origin / has integrity=\nAND crossorigin=   ; else FAIL",
+     "fix": "Prefer self-hosting; otherwise add SRI hashes and re-pin on every version bump.",
+     "tool": "HTML parser"
+    },
+    {
+     "id": "AG-SUP-02",
+     "title": "Pin dependencies by integrity hash",
+     "applies": "MUST · L0 L1 L2",
+     "check_type": "static",
+     "why": "A floating version is an unsigned cheque to whoever controls the registry or CDN. Pinning by content hash (not just semver) defeats tampering and typosquat republish.",
+     "check": "lockfile with integrity hashes committed ; install uses npm ci /\n--frozen-lockfile ; no '@latest' / unpinned '@vN' / floating CDN",
+     "fix": "Commit the lockfile; install frozen; pin any surviving CDN ref to an exact version + SRI.",
+     "tool": "lockfile lint + ripgrep"
+    },
+    {
+     "id": "AG-SUP-03",
+     "title": "Reproducible build; pinned toolchain",
+     "applies": "SHOULD · L0 L1 L2",
+     "check_type": "static",
+     "why": "A reproducible build is auditable; a drifting toolchain is not.",
+     "check": ".nvmrc/engines present ; SSG pinned ; base image pinned by digest ;\nbuild is deterministic",
+     "fix": "Pin Node, the SSG, and any container base image by digest.",
+     "tool": "build-config lint"
+    },
+    {
+     "id": "AG-SUP-04",
+     "title": "No secrets in shipped output",
+     "applies": "MUST · L0 L1 L2",
+     "check_type": "static",
+     "why": "The build artifact is public the instant it deploys; a baked token or private key is immediately compromised.",
+     "check": "secret scan of the BUILD DIR => 0 hits",
+     "fix": "Scan dist/ in CI; reject on any hit; rotate anything leaked.",
+     "tool": "gitleaks / trufflehog over dist/"
+    },
+    {
+     "id": "AG-SUP-05",
+     "title": "No unintended source maps",
+     "applies": "SHOULD · L0 L1 L2",
+     "check_type": "static",
+     "why": "Shipped .map files hand an attacker your original source and structure.",
+     "check": "no sourceMappingURL / .map served in production\n(unless intentional and documented)",
+     "fix": "Disable production source-map emission, or host maps privately.",
+     "tool": "ripgrep over dist/"
+    },
+    {
+     "id": "AG-SUP-06",
+     "title": "No known-vulnerable dependencies",
+     "applies": "MUST · L0 L1 L2",
+     "check_type": "static",
+     "why": "Shipping a dependency with a known high/critical CVE hands the attacker a public exploit.",
+     "check": "vuln scan of resolved deps => 0 high/critical (or each triaged\nwith a recorded, time-bounded waiver)",
+     "fix": "Upgrade or replace; gate the build; waive only with justification + expiry.",
+     "tool": "osv-scanner / trivy fs / npm audit --audit-level=high"
+    },
+    {
+     "id": "AG-SUP-07",
+     "title": "SBOM emitted and retained",
+     "applies": "SHOULD · L0 L1 L2",
+     "check_type": "static",
+     "why": "You cannot respond to the next supply-chain CVE for components you cannot enumerate.",
+     "check": "CycloneDX/SPDX SBOM produced per build and retained with the release",
+     "fix": "Generate an SBOM in CI and attach it to the artifact.",
+     "tool": "syft / cdxgen"
+    },
+    {
+     "id": "AG-SUP-08",
+     "title": "Signed releases / build provenance",
+     "applies": "SHOULD · L0 L1 L2",
+     "check_type": "static",
+     "why": "Signatures and provenance let consumers verify the artifact is the one your pipeline built, unaltered.",
+     "check": "release artifacts signed (Sigstore/cosign or registry provenance);\nverification documented",
+     "fix": "Sign in CI; publish provenance; document verification.",
+     "tool": "cosign / npm provenance / SLSA"
+    }
+   ]
+  },
+  {
+   "section": "§7",
+   "prefix": "AG-CI",
+   "title": "Build Pipeline / CI Hardening",
+   "rules": [
+    {
+     "id": "AG-CI-01",
+     "title": "Pin third-party Actions/steps to a full commit SHA",
+     "applies": "MUST · L0 L1 L2",
+     "check_type": "static",
+     "why": "A mutable tag (@v4) lets the action's owner — or whoever compromises them — change the code you run with repo write access. A 40-hex commit SHA is immutable.",
+     "check": "every `uses:` referencing a third party pins a full 40-char\ncommit SHA (not a tag or branch)",
+     "fix": "Replace tags with the resolved SHA; let a bot bump SHAs under review.",
+     "tool": "zizmor / actionlint / ripgrep 'uses:.*@(?![0-9a-f]{40})'"
+    },
+    {
+     "id": "AG-CI-02",
+     "title": "Least-privilege workflow tokens",
+     "applies": "MUST · L0 L1 L2",
+     "check_type": "static",
+     "why": "The default workflow token is often write-all; a single compromised step inherits it.",
+     "check": "top-level permissions: defaults to read ; write scoped to the\nspecific job that needs it",
+     "fix": "Add an explicit minimal permissions: block at workflow and job level.",
+     "tool": "actionlint / policy check"
+    },
+    {
+     "id": "AG-CI-03",
+     "title": "No untrusted code in a privileged context",
+     "applies": "MUST · L0 L1 L2",
+     "check_type": "static",
+     "why": "A pull_request_target job (which carries secrets) that checks out and builds/executes the PR head runs attacker-supplied code with your credentials — a classic CI takeover.",
+     "check": "no pull_request_target job checks out head.ref AND runs\nbuild/exec/install with access to secrets",
+     "fix": "Use pull_request (no secrets) for untrusted code, or split so the privileged job never executes PR code.",
+     "tool": "zizmor / workflow analysis"
+    },
+    {
+     "id": "AG-CI-04",
+     "title": "Secrets are not exposed to forks or echoed",
+     "applies": "MUST · L0 L1 L2",
+     "check_type": "static",
+     "why": "Secrets reaching fork PRs, or printed to logs, leak to anyone who can open a PR or read a build.",
+     "check": "no secret passed to fork-triggered jobs ; no echo/printenv of\n${{ secrets.* }} ; masking on",
+     "fix": "Gate secret-using jobs to trusted events; never print secrets; treat masking as defence-in-depth, not the control.",
+     "tool": "workflow analysis + log scan"
+    },
+    {
+     "id": "AG-CI-05",
+     "title": "Protected branch with the conformance gate required",
+     "applies": "SHOULD · L0 L1 L2",
+     "check_type": "manual",
+     "why": "A standard that isn't a required status check is a suggestion. Make AGSSH a merge gate.",
+     "check": "default branch protected ; AGSSH conformance check required ;\nno force-push ; review required",
+     "fix": "Enable branch protection and mark the gate a required status check.",
+     "tool": "repo / org policy"
+    },
+    {
+     "id": "AG-CI-06",
+     "title": "Automated contributors run under scoped identity and the same gate",
+     "applies": "SHOULD · L0 L1 L2",
+     "check_type": "manual",
+     "why": "Bots and agents that open PRs across many repos are high-value targets and high-blast-radius writers; their commits deserve at least the scrutiny human ones get.",
+     "check": "automation uses a scoped token (least repos/permissions), signs\ncommits, and its PRs pass the AGSSH gate before merge",
+     "fix": "Scope the automation token; enable commit signing; route automated PRs through the same required gate.",
+     "tool": "org policy / token scoping"
+    }
+   ]
+  },
+  {
+   "section": "§8",
+   "prefix": "AG-PRV",
+   "title": "Privacy & Consent",
+   "rules": [
+    {
+     "id": "AG-PRV-01",
+     "title": "Zero telemetry on air-gapped surfaces",
+     "applies": "MUST · L0 L1 (privacy tools)",
+     "check_type": "dynamic",
+     "why": "The correct number of analytics providers on a privacy tool is zero. Anything else contradicts the claim the tool is built on.",
+     "check": "zero analytics signatures AND zero third-party requests\n(subsumed by AG-NET-01)",
+     "fix": "Remove analytics entirely; derive usage signal from edge logs you already control if you must.",
+     "tool": "chromedp request capture"
+    },
+    {
+     "id": "AG-PRV-02",
+     "title": "Prior blocking of non-essential third parties",
+     "applies": "MUST · L0 L1 L2 (decisive at L2)",
+     "check_type": "dynamic",
+     "why": "No analytics / ads / embeds / fonts may fire before explicit opt-in. EU law requires PRIOR blocking; exporting IPs to US analytics is a transfer-law exposure. Loading the tracker on page load and letting the visitor decline afterwards is the exact anti-pattern — the cookie is already set and the hit already sent.",
+     "check": "first visit, NO consent cookie => zero requests to analytics/ad\nhosts AND zero non-essential cookies set",
+     "fix": "Consent Mode with analytics_storage/ad_storage = denied by default, granted only after explicit consent; wire the banner's accept/decline to actually toggle loading. Or drop third-party analytics for an EU-hosted, cookieless one.",
+     "tool": "chromedp (no-consent first-visit capture)"
+    },
+    {
+     "id": "AG-PRV-03",
+     "title": "Self-host fonts",
+     "applies": "MUST · L0 L1 L2",
+     "check_type": "static",
+     "why": "Dynamically embedding Google Fonts has been ruled a privacy violation: it ships the visitor's IP to a third party on every load.",
+     "check": "zero fonts.googleapis.com / fonts.gstatic.com references",
+     "fix": "Self-host WOFF2 files in @font-face with font-src 'self'.",
+     "tool": "HTML/CSS scan"
+    },
+    {
+     "id": "AG-PRV-04",
+     "title": "Minimize storage & fingerprinting",
+     "applies": "MUST · L0 L1   (SHOULD · L2)",
+     "check_type": "dynamic",
+     "why": "Storage and fingerprinting beyond functional need quietly erode the posture and the policy you publish.",
+     "check": "enumerate cookies + localStorage on load against an allowlist ;\nnothing non-functional present",
+     "fix": "Keep only what the tool needs; disclose any remaining storage.",
+     "tool": "chromedp storage inspection"
+    },
+    {
+     "id": "AG-PRV-05",
+     "title": "Cookie attributes where cookies exist",
+     "applies": "MUST · when any cookie is set",
+     "check_type": "dynamic",
+     "why": "A cookie without Secure/HttpOnly/SameSite is interceptable, script-readable and CSRF-usable.",
+     "check": "every cookie => Secure ; HttpOnly unless a script must read it ;\nSameSite=Lax|Strict ; __Host- prefix where applicable",
+     "fix": "Set the full attribute set; prefer __Host- prefixed cookies.",
+     "tool": "chromedp cookie inspection"
+    },
+    {
+     "id": "AG-PRV-06",
+     "title": "Third-party embeds isolated and consent-gated",
+     "applies": "MUST · L2   (forbidden · L0 L1)",
+     "check_type": "dynamic",
+     "why": "An embedded video/map/widget sets third-party cookies and runs third-party code; on a privacy surface it is egress and tracking.",
+     "check": "L0/L1 => zero third-party iframes ; L2 => embeds sandboxed,\nconsent-gated, privacy-mode variant or click-to-load facade",
+     "fix": "Use no-cookie/privacy embeds behind a facade and consent; sandbox the iframe.",
+     "tool": "chromedp + DOM scan"
+    }
+   ]
+  },
+  {
+   "section": "§9",
+   "prefix": "AG-OUT",
+   "title": "Output / Document Hygiene",
+   "rules": [
+    {
+     "id": "AG-OUT-01",
+     "title": "Neutralize output metadata",
+     "applies": "MUST · file-generating tools",
+     "check_type": "dynamic",
+     "why": "Generated files leak their toolchain: a PDF's Info dict AND its XMP packet carry Producer/Creator/timestamps (jsPDF embeds these by default); images carry EXIF/GPS/ICC/maker-notes.",
+     "check": "sample output => Info + XMP neutralized, creation timestamp\nneutral ; image EXIF/GPS/ICC stripped",
+     "fix": "Set neutral document properties and clear XMP; strip image metadata on processing.",
+     "tool": "exiftool / PDF metadata read"
+    },
+    {
+     "id": "AG-OUT-02",
+     "title": "Deterministic output",
+     "applies": "SHOULD · file-generating tools",
+     "check_type": "dynamic",
+     "why": "Identical inputs yielding byte-identical outputs is both anti-fingerprinting and a reproducibility property.",
+     "check": "two runs on the same input => identical bytes (modulo intended content)",
+     "fix": "Zero or fix timestamps and any other non-deterministic fields.",
+     "tool": "sha256 diff of two runs"
+    },
+    {
+     "id": "AG-OUT-03",
+     "title": "In-browser only, no server round-trip",
+     "applies": "MUST · file-generating tools",
+     "check_type": "dynamic",
+     "why": "The 'nothing is uploaded' claim must hold at the data-flow level: output is produced and delivered locally.",
+     "check": "output delivered via Blob/object-URL ; no POST of user content\nin the processing path (subsumed by AG-NET-01/04)",
+     "fix": "Generate and download client-side; remove any upload endpoint from the flow.",
+     "tool": "chromedp request capture"
+    }
+   ]
+  },
+  {
+   "section": "§10",
+   "prefix": "AG-GOV",
+   "title": "Governance & Conformance Integrity",
+   "rules": [
+    {
+     "id": "AG-GOV-01",
+     "title": "Waivers can never cover a MUST",
+     "applies": "MUST · all profiles",
+     "check_type": "static",
+     "why": "Conformance integrity needs a hard floor. Every CRITICAL/HIGH MUST is non-waivable by construction; the deviation mechanism exists only for SHOULD items, keeping the load-bearing controls outside any human-justification path.",
+     "check": "no entry in deviations[] references a rule whose obligation is MUST\n=> any such entry FAILS the gate",
+     "fix": "Fix the MUST; never waive it. Re-scope to a lower profile only if the rule genuinely does not apply to the surface.",
+     "tool": "manifest cross-check"
+    },
+    {
+     "id": "AG-GOV-02",
+     "title": "Waivers auto-expire; the runner enforces it",
+     "applies": "MUST · when deviations exist",
+     "check_type": "static",
+     "why": "A waiver without enforced expiry becomes permanent debt. The runner compares expires against now; an expired or missing expiry re-enforces the rule immediately, so a waiver can only ever buy bounded time — a fake far-future date still decays on renewal.",
+     "check": "every deviation has expires  the rule is re-enforced (fail)",
+     "fix": "Set a real, short expiry; renew under review or remediate.",
+     "tool": "runner clock check"
+    },
+    {
+     "id": "AG-GOV-03",
+     "title": "Deviation budget / debt ceiling",
+     "applies": "MUST · L0 L1 L2",
+     "check_type": "static",
+     "why": "Truthfulness cannot be machine-judged, but volume can be capped. A per-surface ceiling on the count and weight of active deviations makes waiving-to-green structurally impossible past the budget.",
+     "check": "sum(active deviation weights)  else FAIL",
+     "fix": "Pay down debt before adding more; the budget forces remediation over accumulation.",
+     "tool": "runner budget check"
+    },
+    {
+     "id": "AG-GOV-04",
+     "title": "Segregation of duties on waivers",
+     "applies": "MUST · when deviations exist (Gold)",
+     "check_type": "static",
+     "why": "A self-approved waiver is no control. Each deviation must be signed by an authorized approver distinct from the change author — turning a waiver into an attributable, accountable act rather than anonymous YAML.",
+     "check": "each deviation carries approver != author AND a signature\nverifiable against an approver allowlist",
+     "fix": "Route waivers through a named approver; sign them; reject self-approval.",
+     "tool": "cosign / signed-off-by + approver allowlist"
+    },
+    {
+     "id": "AG-GOV-05",
+     "title": "Conformance record is externally derived and signed",
+     "applies": "MUST · L0 L1 L2 (Gold)",
+     "check_type": "dynamic",
+     "why": "A record produced inside a compromised build host can be forged. The authoritative record is produced by an independent runner observing the LIVE deployed surface — headers, egress, DNS and TLS are externally observable — and is signed and bound to the artifact digest, so build-host compromise cannot fabricate production reality.",
+     "check": "record generated against the live URL by an out-of-band runner ;\nsigned (in-toto / cosign) ; bound to artifact digest ; signature verifies",
+     "fix": "Run the gate against production from a separate trusted runner; sign the attestation; verify on consumption.",
+     "tool": "external runner + cosign / in-toto attestation"
+    },
+    {
+     "id": "AG-GOV-06",
+     "title": "Active egress canary - prove the wall, do not observe its silence",
+     "applies": "MUST · L0 L1",
+     "check_type": "dynamic",
+     "why": "Observing 'no egress during a test' proves a negative and is defeated by env-detecting, time-delayed or interaction-gated exfiltration. Instead the harness injects a known exfil probe and asserts the policy BLOCKS it — a positive test of a capability boundary that holds in production for every visitor regardless of attacker timing. CSP is the boundary; the canary proves it is real.",
+     "check": "synthetic beacon to a non-allowlisted origin (fetch/img/beacon/ws)\nis blocked by CSP ; a violation is recorded ; production same-origin\nreporting is collecting",
+     "fix": "Lock every fetch-directive to self (AG-NET-01); add the blocked-probe test; collect violation reports same-origin in production.",
+     "tool": "chromedp + injected probe + CSP report endpoint"
+    },
+    {
+     "id": "AG-GOV-07",
+     "title": "Build environment is ephemeral and hermetic",
+     "applies": "MUST · L0 L1 L2 (Gold)",
+     "check_type": "static",
+     "why": "A persistent build agent is a persistent foothold that can tamper outputs after the gate. A fresh isolated runner per build, a base image pinned by digest, and short-lived OIDC credentials shrink the window in which the host can forge results — and pair with external verification (AG-GOV-05) so tampering is contradicted by the production scan.",
+     "check": "build runs on a fresh ephemeral runner ; base image pinned by\ndigest ; credentials are short-lived OIDC (no long-lived secrets on agent)",
+     "fix": "Use ephemeral CI runners, digest-pinned images and OIDC federation instead of stored secrets.",
+     "tool": "CI config review + provenance"
+    }
+   ]
+  }
+ ]
+}
