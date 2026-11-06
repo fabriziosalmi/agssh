@@ -2,7 +2,7 @@
   "name": "agssh",
   "displayName": "agssh",
   "description": "Scan a live URL or an .airgap.yml against AGSSH-STD-001 from the editor: verdict, fix queue and what could not be checked in the sidebar, a report panel, and fix prompts to hand to Copilot or Claude.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "fabriziosalmi",
   "license": "Apache-2.0",
   "repository": {
