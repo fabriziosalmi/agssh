@@ -6,6 +6,19 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **AG-HDR-07 is checked instead of reported inconclusive.** The runner reads the
+  document's `Cache-Control` and fetches its same-origin assets. A content-hashed
+  asset (the `/_astro/` directory, a hex digest, or an 8-character Rollup/Vite
+  digest in the filename) not served `public, max-age=31536000, immutable` fails,
+  and so does a document served `immutable` or with a max-age of a year or more.
+  A document served `no-cache`, `no-store` or `max-age=0` passes its half. A
+  document with another lifetime or no `Cache-Control`, an asset whose filename
+  cannot be classified and is not long-cached, and an asset that cannot be
+  fetched stay `INCONCLUSIVE`: the standard does not put a number on "short", and
+  an unrecognised hash is not proof of no hash.
+
 ### Fixed (verdict-affecting)
 
 - **AG-GOV-06 passes only on a CSP block it observed.** The egress canary used to
