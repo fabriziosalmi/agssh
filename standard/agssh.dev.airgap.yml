@@ -1,6 +1,6 @@
 # AGSSH-STD-001 conformance manifest for the standard's own site (agssh.dev).
 # The dogfood: the surface that publishes the standard is scanned against it at the
-# highest bar — Gold profile, L0 (strict air-gap), zero waivers. The header/CSP/TLS
+# highest bar: Gold profile, L0 (strict air-gap), with the governed SHOULD waivers below. The header/CSP/TLS
 # rules are satisfied by Cloudflare in front of GitHub Pages (see standard/DEPLOY.md);
 # the supply/CI/governance rules are satisfied by the publish-standard.yml pipeline,
 # which also -signs the record (AG-GOV-05) from an ephemeral OIDC runner (AG-GOV-07).
@@ -25,13 +25,13 @@ dns:
 pipeline:
   enforce_ci_rules: true        # apply the AG-CI family to this repo's workflows
 
-allow:                          # L0 is strict: everything empty — no third-party anything
+allow:                          # L0 is strict: everything empty, no third-party anything
   connect:      []
   storage:      []
   embeds:       []
   subresources: []
 
-waivers:                        # governed SHOULD deviations — the standard eating
+waivers:                        # governed SHOULD deviations: the standard eating
   budget:                       # its own dog food, waiver mechanism included.
     max_count: 5
     max_weight: 9               # 4×MEDIUM(2) + 1×LOW(1) = 9
@@ -39,7 +39,7 @@ waivers:                        # governed SHOULD deviations — the standard ea
 
 # Five SHOULD rules whose verification is process-specific and not auto-checkable
 # from a single scan. Each is waived WITH a real compensating control (reason +
-# evidence), a distinct approver, and a signature — exactly the governance the
+# evidence), a distinct approver, and a signature: exactly the governance the
 # standard defines (AG-GOV-02/03/04). MUSTs are never here (AG-GOV-01). Re-attest
 # before `expires`; the runner enforces the expiry against its own clock.
 deviations:

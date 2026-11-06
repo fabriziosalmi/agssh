@@ -30,7 +30,7 @@ func All() []Rule {
 
 		// ---- §4 AG-HDR — Security Response Headers ----
 		{"AG-HDR-01", "HSTS with a real max-age", "AG-HDR", Must, High, B, PlaneStatic, always, chkHSTS},
-		{"AG-HDR-01a", "HSTS scope is sticky — gate it", "AG-HDR", Must, High, S, PlaneStatic, always, chkHSTSScope},
+		{"AG-HDR-01a", "HSTS scope is sticky: gate it", "AG-HDR", Must, High, S, PlaneStatic, always, chkHSTSScope},
 		{"AG-HDR-02", "Disable MIME sniffing", "AG-HDR", Must, High, B, PlaneStatic, always, chkNosniff},
 		{"AG-HDR-03", "X-Frame-Options", "AG-HDR", Must, High, B, PlaneStatic, always, chkXFO},
 		{"AG-HDR-04", "Referrer-Policy", "AG-HDR", Must, Medium, S, PlaneStatic, always, chkReferrer},

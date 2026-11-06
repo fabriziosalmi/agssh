@@ -1,15 +1,15 @@
-# Publishing agssh.dev — GitHub Pages + Cloudflare
+# Publishing agssh.dev: GitHub Pages + Cloudflare
 
 The plan to make **agssh.dev** a static surface that passes **AGSSH-STD-001 at
 Gold / L0** and wears its own `agssh`-generated badge. Three layers:
 
-- **Content** — a purpose-built, CSP-clean static page (`standard/build_site.py` →
+- **Content**: a purpose-built, CSP-clean static page (`standard/build_site.py` →
   `site/`): one same-origin stylesheet, zero inline styles/scripts, zero
   third-party assets. This is what lets the site pass `AG-NET-01` / `AG-CSP-02`.
-- **Edge (Cloudflare)** — injects the headers GitHub Pages cannot set (CSP, HSTS,
+- **Edge (Cloudflare)**: injects the headers GitHub Pages cannot set (CSP, HSTS,
   …), enforces the TLS floor, and holds the DNS controls (CAA, DNSSEC). **This
   page is what you set up by hand / Terraform.**
-- **Pipeline** — [`.github/workflows/publish-standard.yml`](../.github/workflows/publish-standard.yml)
+- **Pipeline**: [`.github/workflows/publish-standard.yml`](../.github/workflows/publish-standard.yml)
   builds the site, deploys it, then scans the live URL at Gold with `-sign`
   (keyless cosign, OIDC) and emits the signed record + SBOM + badge.
 
@@ -27,7 +27,7 @@ Gold / L0** and wears its own `agssh`-generated badge. Three layers:
 | DNSSEC | **Enable** (then add the DS record at your registrar) | AG-DNS-02 |
 | CAA records | see below | AG-DNS-01 |
 
-**CAA** — Cloudflare's Universal SSL issues from a small set of CAs, so pin *those*
+**CAA**: Cloudflare's Universal SSL issues from a small set of CAs, so pin *those*
 (a zone with only `iodef`/no `issue` now FAILS `AG-DNS-01`). Add on the apex:
 
 ```
@@ -40,7 +40,7 @@ agssh.dev.  CAA  0 iodef     "mailto:fabrizio.salmi@gmail.com"
 ```
 
 > Verify against the CA Cloudflare actually uses for your cert before locking it
-> down — an over-tight CAA can block renewal. Start with the set above (CF's
+> down: an over-tight CAA can block renewal. Start with the set above (CF's
 > documented issuers) and trim once a cert has renewed cleanly.
 
 ## 2. Response headers (Cloudflare Rules → *Transform Rules* → *Modify Response Header*, or a Worker)
@@ -73,7 +73,7 @@ Header → rule map:
 > The content already has **no scripts** and **no third-party assets**, so
 > `script-src`, `font-src`, `connect-src`, `object-src`, … all inherit
 > `default-src 'none'` and pass. `style-src 'self'` / `img-src 'self'` cover the
-> one stylesheet and the badge — both same-origin.
+> one stylesheet and the badge, both same-origin.
 
 ## 3. Staging note (AG-CSP-04)
 
@@ -87,15 +87,21 @@ confirm the site renders and reports are clean, then switch the header name to
 ## What the pipeline does (Gold's supply / CI / governance rules)
 
 Once the edge is live, [`publish-standard.yml`](../.github/workflows/publish-standard.yml)
-closes the rest of Gold from an **ephemeral OIDC runner** (AG-GOV-07):
+runs from an **ephemeral OIDC runner** (AG-GOV-07) and:
 
-- scans `https://agssh.dev` with `agssh -profile Gold -level L0 -sign` — the
-  externally-derived, cosign-signed conformance record is `AG-GOV-05`;
-- emits an **SBOM** (`AG-SUP-07`) and build provenance (`AG-SUP-08`);
-- SHA-pinned Actions, least-privilege tokens, required-check branch protection
-  cover `AG-CI-01…06`; zero waivers make `AG-GOV-01…04` trivially satisfied;
-- publishes the signed record, the SBOM, and the freshly-scanned **badge** back to
-  the site, so `agssh.dev` shows a Gold medal that reproduces from its own record.
+- scans `https://agssh.dev` with `agssh -profile Gold -level L0 -sign`; the
+  cosign-signed conformance record is `AG-GOV-05`;
+- emits an **SBOM** with syft (`AG-SUP-07`);
+- relies on SHA-pinned Actions, least-privilege tokens and required-check branch
+  protection for the `AG-CI` family;
+- publishes the record, the SBOM and the scan-derived **badge** back to the site,
+  whatever the verdict: a metal tier only when the scan is conformant, otherwise the
+  grey target tier and the score.
+
+Five SHOULD rules are covered by governed waivers in
+[`agssh.dev.airgap.yml`](agssh.dev.airgap.yml), each with its reason and expiry:
+`AG-CSP-04`, `AG-HDR-07`, `AG-SUP-03`, `AG-SUP-08` (no separate SLSA provenance is
+verified) and `AG-CI-06`.
 
 The gate is **fail-closed**: if the live scan is not Gold-conformant, the workflow
-goes red — the standard that says *prove it* proves it, or admits it can't.
+goes red, and the badge on the site says so.
