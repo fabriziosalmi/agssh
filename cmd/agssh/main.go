@@ -6,6 +6,7 @@
 //
 // Two entry points: `agssh scan <url>` synthesizes a manifest from flags (no
 // config file); `agssh -config .airgap.yml` evaluates a declared manifest.
+// `agssh rule <id>` prints one rule's text from the standard, offline.
 package main
 
 import (
@@ -37,6 +38,9 @@ func main() {
 	// original flag-driven, manifest-based behaviour untouched.
 	if len(os.Args) > 1 && os.Args[1] == "scan" {
 		os.Exit(runScan(os.Args[2:]))
+	}
+	if len(os.Args) > 1 && os.Args[1] == "rule" {
+		os.Exit(runRule(os.Args[2:], os.Stdout, os.Stderr))
 	}
 
 	cfgPath := flag.String("config", ".airgap.yml", "path to .airgap.yml")
