@@ -4,46 +4,157 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/chromedp/cdproto/audits"
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
 )
 
-// canaryOrigin is a resolvable but non-allowlisted host. A *successful*
-// response to it means the CSP egress boundary is down. example.com is
+// canaryHost is a resolvable but non-allowlisted host. example.com is
 // IANA-reserved for exactly this kind of test traffic and carries no payload.
 const canaryHost = "example.com"
+
+// The canary fires one probe per egress channel: fetch and sendBeacon are
+// governed by connect-src, the pixel by img-src.
+const (
+	canaryFetch  = "https://" + canaryHost + "/agssh-canary-probe"
+	canaryPixel  = "https://" + canaryHost + "/agssh-canary-pixel.png"
+	canaryBeacon = "https://" + canaryHost + "/agssh-canary-beacon"
+)
+
+var canaryProbeURLs = []string{canaryFetch, canaryPixel, canaryBeacon}
+
 const canaryJS = `(function(){
-  try{ fetch('https://example.com/agssh-canary-probe',{mode:'no-cors'}); }catch(e){}
-  try{ var i=new Image(); i.src='https://example.com/agssh-canary-pixel.png'; }catch(e){}
-  try{ if(navigator.sendBeacon){ navigator.sendBeacon('https://example.com/agssh-canary-beacon','probe'); } }catch(e){}
+  try{ fetch('` + canaryFetch + `',{mode:'no-cors'}).catch(function(){}); }catch(e){}
+  try{ var i=new Image(); i.src='` + canaryPixel + `'; }catch(e){}
+  try{ if(navigator.sendBeacon){ navigator.sendBeacon('` + canaryBeacon + `','probe'); } }catch(e){}
   return 1;
 })()`
+
+// canaryWait bounds how long the canary waits for every probe to reach an
+// outcome after it fires. A probe still without one is INCONCLUSIVE.
+const canaryWait = 10 * time.Second
 
 type netObs struct {
 	mu        sync.Mutex
 	requested map[string]bool
 	responded map[string]bool
+
+	// Per-URL outcomes, for the canary. loadingFailed carries only a request id,
+	// so urls maps it back to the URL the request was for.
+	urls       map[network.RequestID]string
+	answered   map[string]bool   // a response (or a redirect) came back for the URL
+	failed     map[string]string // loadingFailed: blockedReason, else the net error
+	cspBlocked map[string]bool   // an enforced (not report-only) CSP blocked the URL
+	changed    chan struct{}     // signalled after every recorded event
 }
 
 func newObs() *netObs {
-	return &netObs{requested: map[string]bool{}, responded: map[string]bool{}}
+	return &netObs{
+		requested: map[string]bool{}, responded: map[string]bool{},
+		urls: map[network.RequestID]string{}, answered: map[string]bool{},
+		failed: map[string]string{}, cspBlocked: map[string]bool{},
+		changed: make(chan struct{}, 1),
+	}
 }
 
 func (o *netObs) on(ev interface{}) {
+	o.mu.Lock()
 	switch e := ev.(type) {
 	case *network.EventRequestWillBeSent:
-		o.mu.Lock()
 		o.requested[hostOnly(e.Request.URL)] = true
-		o.mu.Unlock()
+		o.urls[e.RequestID] = e.Request.URL
+		if e.RedirectResponse != nil {
+			// The redirected URL was answered: the request left the browser.
+			o.answered[e.RedirectResponse.URL] = true
+		}
 	case *network.EventResponseReceived:
-		o.mu.Lock()
 		o.responded[hostOnly(e.Response.URL)] = true
+		o.answered[e.Response.URL] = true
+	case *network.EventLoadingFailed:
+		if u, ok := o.urls[e.RequestID]; ok {
+			reason := string(e.BlockedReason)
+			if reason == "" {
+				reason = e.ErrorText
+			}
+			if reason == "" {
+				reason = "failed without a reason"
+			}
+			o.failed[u] = reason
+		}
+	case *audits.EventIssueAdded:
+		// Chrome reports CSP-blocked fetch/sendBeacon here only: they are stopped
+		// in the renderer and never reach the network domain.
+		if e.Issue != nil && e.Issue.Details != nil {
+			if d := e.Issue.Details.ContentSecurityPolicyIssueDetails; d != nil && !d.IsReportOnly && d.BlockedURL != "" {
+				o.cspBlocked[d.BlockedURL] = true
+			}
+		}
+	default:
 		o.mu.Unlock()
+		return
+	}
+	o.mu.Unlock()
+	select {
+	case o.changed <- struct{}{}:
+	default:
+	}
+}
+
+// canaryProbe is what was observed for one canary URL.
+type canaryProbe struct {
+	URL        string `json:"url"`
+	Answered   bool   `json:"answered"`
+	CSPBlocked bool   `json:"csp_blocked"`
+	Failure    string `json:"failure,omitempty"`
+}
+
+func (p canaryProbe) settled() bool { return p.Answered || p.CSPBlocked || p.Failure != "" }
+
+func (o *netObs) canaryProbes() []canaryProbe {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	ps := make([]canaryProbe, 0, len(canaryProbeURLs))
+	for _, u := range canaryProbeURLs {
+		p := canaryProbe{URL: u, Answered: o.answered[u], CSPBlocked: o.cspBlocked[u]}
+		switch f := o.failed[u]; {
+		case f == string(network.BlockedReasonCsp):
+			p.CSPBlocked = true
+		case f != "":
+			p.Failure = f
+		}
+		ps = append(ps, p)
+	}
+	return ps
+}
+
+// awaitCanary returns once every canary probe has an outcome, or after wait.
+// Expiry is not an error: the verdict reports unsettled probes as INCONCLUSIVE.
+func awaitCanary(obs *netObs, wait time.Duration) chromedp.ActionFunc {
+	return func(ctx context.Context) error {
+		deadline := time.NewTimer(wait)
+		defer deadline.Stop()
+		for {
+			settled := true
+			for _, p := range obs.canaryProbes() {
+				settled = settled && p.settled()
+			}
+			if settled {
+				return nil
+			}
+			select {
+			case <-obs.changed:
+			case <-deadline.C:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
 	}
 }
 
@@ -60,23 +171,34 @@ func (o *netObs) hosts(set map[string]bool) []string {
 	return hs
 }
 
-// browse loads url in headless Chrome, optionally injecting JS, and returns the
-// observed network activity. Errors (e.g. no Chrome) propagate -> Inconclusive.
-func browse(parent context.Context, chromePath, url, inject string, settle time.Duration) (*netObs, error) {
+// extraBrowserFlags is a test seam: tests append Chrome switches (e.g.
+// host-resolver-rules) to stand a local server in for the canary host. It is
+// never set outside tests.
+var extraBrowserFlags []chromedp.ExecAllocatorOption
+
+// headless starts a headless Chrome tab under parent and returns its context.
+// The cancel func tears down the tab and the browser process.
+func headless(parent context.Context, chromePath string) (context.Context, context.CancelFunc) {
 	opts := append([]chromedp.ExecAllocatorOption{}, chromedp.DefaultExecAllocatorOptions[:]...)
 	opts = append(opts, chromedp.Headless, chromedp.DisableGPU, chromedp.NoSandbox)
 	if chromePath != "" {
 		opts = append(opts, chromedp.ExecPath(chromePath))
 	}
+	opts = append(opts, extraBrowserFlags...)
 	allocCtx, cancelA := chromedp.NewExecAllocator(parent, opts...)
-	defer cancelA()
 	ctx, cancel := chromedp.NewContext(allocCtx)
-	defer cancel()
 	// Safety cap on a headless run (a hung browser must not wedge the check). 45s
 	// matches the CLI's default per-check budget and leaves headroom for a cold
 	// Chrome start under load / the race detector on CI, where 30s could flake.
 	ctx, cancelT := context.WithTimeout(ctx, 45*time.Second)
-	defer cancelT()
+	return ctx, func() { cancelT(); cancel(); cancelA() }
+}
+
+// browse loads url in headless Chrome, optionally injecting JS, and returns the
+// observed network activity. Errors (e.g. no Chrome) propagate -> Inconclusive.
+func browse(parent context.Context, chromePath, url, inject string, settle time.Duration) (*netObs, error) {
+	ctx, cancel := headless(parent, chromePath)
+	defer cancel()
 
 	obs := newObs()
 	chromedp.ListenTarget(ctx, obs.on)
@@ -186,51 +308,73 @@ func preConsentVerdict(requested []string) Outcome {
 }
 
 // AG-GOV-06: the active egress canary — a known probe to a non-allowlisted
-// origin MUST be blocked. A successful response means the wall is down.
+// origin MUST be blocked by the page's CSP, and the block must be observed.
 func chkEgressCanary(ctx context.Context, c *CheckCtx) Outcome {
 	if c.Tools.Chrome == "" {
 		return inconclusive("no Chrome/Chromium found for canary verification")
 	}
-	obs, err := browse(ctx, c.Tools.Chrome, c.Surface.URL, canaryJS, 1*time.Second)
+	bctx, cancel := headless(ctx, c.Tools.Chrome)
+	defer cancel()
+	obs := newObs()
+	chromedp.ListenTarget(bctx, obs.on)
+	var res []byte
+	err := chromedp.Run(bctx,
+		network.Enable(),
+		audits.Enable(),
+		chromedp.Navigate(c.Surface.URL),
+		chromedp.Sleep(1*time.Second), // the post-load settle this check always had, kept as is
+		chromedp.Evaluate(canaryJS, &res),
+		awaitCanary(obs, canaryWait),
+	)
 	if err != nil {
 		return inconclusive("headless canary run failed: " + err.Error())
 	}
-	obs.mu.Lock()
-	attempted, got := obs.requested[canaryHost], obs.responded[canaryHost]
-	obs.mu.Unlock()
-	return egressCanaryVerdict(attempted, got)
+	return egressCanaryVerdict(obs.canaryProbes())
 }
 
-// egressCanaryVerdict: a response to the canary means the egress wall is down.
-func egressCanaryVerdict(attempted, responded bool) Outcome {
-	if responded {
+// egressCanaryVerdict judges the canary from what was observed per probe.
+// FAIL: a probe was answered. A CSP-blocked request never leaves the browser, so
+// a response (from the canary host, a captive portal or a proxy alike) proves
+// the page's CSP let that channel out. PASS: every probe was blocked by an
+// enforced CSP, as reported by the browser. Anything else (a network error, a
+// report-only policy, no event at all) proves nothing: INCONCLUSIVE.
+func egressCanaryVerdict(probes []canaryProbe) Outcome {
+	var answered, unproven []string
+	for _, p := range probes {
+		switch {
+		case p.Answered:
+			answered = append(answered, p.URL)
+		case p.CSPBlocked:
+		case p.Failure != "":
+			unproven = append(unproven, p.URL+" ("+p.Failure+")")
+		default:
+			unproven = append(unproven, p.URL+" (no outcome observed within "+canaryWait.String()+")")
+		}
+	}
+	detail := map[string]any{"probes": probes}
+	if len(answered) > 0 {
 		return Outcome{Status: Fail, Evidence: Evidence{
-			Observed: "canary probe to " + canaryHost + " received a response",
-			Expected: "CSP blocks the probe (no response)",
-			Detail:   map[string]any{"attempted": attempted, "responded": true}}}
+			Observed: "canary probe(s) left the browser and were answered: " + strings.Join(answered, ", "),
+			Expected: "an enforced CSP blocks every canary probe",
+			Detail:   detail}}
+	}
+	if len(probes) == 0 {
+		return inconclusive("no canary probe observed")
+	}
+	if len(unproven) > 0 {
+		return Outcome{Status: Inconclusive, Err: "canary not proven blocked by CSP: " + strings.Join(unproven, "; "),
+			Evidence: Evidence{Detail: detail}}
 	}
 	return Outcome{Status: Pass, Evidence: Evidence{
-		Observed: "canary probe blocked (no response from " + canaryHost + ")",
-		Detail:   map[string]any{"attempted": attempted, "responded": false}}}
+		Observed: fmt.Sprintf("all %d canary probes to %s blocked by an enforced CSP", len(probes), canaryHost),
+		Detail:   detail}}
 }
 
 // browseEval loads url in headless Chrome and returns the JSON string produced by
 // js (which must itself JSON.stringify its result). await=true unwraps a Promise.
 func browseEval(parent context.Context, chromePath, url, js string, settle time.Duration, await bool) (string, error) {
-	opts := append([]chromedp.ExecAllocatorOption{}, chromedp.DefaultExecAllocatorOptions[:]...)
-	opts = append(opts, chromedp.Headless, chromedp.DisableGPU, chromedp.NoSandbox)
-	if chromePath != "" {
-		opts = append(opts, chromedp.ExecPath(chromePath))
-	}
-	allocCtx, cancelA := chromedp.NewExecAllocator(parent, opts...)
-	defer cancelA()
-	ctx, cancel := chromedp.NewContext(allocCtx)
+	ctx, cancel := headless(parent, chromePath)
 	defer cancel()
-	// Safety cap on a headless run (a hung browser must not wedge the check). 45s
-	// matches the CLI's default per-check budget and leaves headroom for a cold
-	// Chrome start under load / the race detector on CI, where 30s could flake.
-	ctx, cancelT := context.WithTimeout(ctx, 45*time.Second)
-	defer cancelT()
 
 	var out string
 	var eval chromedp.Action
@@ -250,16 +394,27 @@ type swReg struct {
 	Script string `json:"script"`
 }
 
-const serviceWorkerJS = `(navigator.serviceWorker ? navigator.serviceWorker.getRegistrations().then(function(rs){` +
-	`return JSON.stringify(rs.map(function(r){var w=r.active||r.waiting||r.installing||{};` +
-	`return {scope:r.scope||'', script:w.scriptURL||''};}));}) : "[]")`
+// swWait bounds how long after load AG-NET-07 waits for a registration. Sites
+// often register on load or when idle, which a cold Chrome can push past a few
+// seconds. The browse cap (and the per-check budget) still bounds the whole run.
+const swWait = 10 * time.Second
+
+// serviceWorkerJS polls getRegistrations() until one appears or swWait passes,
+// then resolves to the JSON array of registrations (empty if none, or if the
+// page has no service-worker API). A rejection propagates as an eval error.
+var serviceWorkerJS = `(navigator.serviceWorker ? new Promise(function(resolve, reject){` +
+	`var deadline=Date.now()+` + strconv.FormatInt(swWait.Milliseconds(), 10) + `;` +
+	`(function poll(){navigator.serviceWorker.getRegistrations().then(function(rs){` +
+	`if(rs.length===0&&Date.now()<deadline){setTimeout(poll,100);return;}` +
+	`resolve(JSON.stringify(rs.map(function(r){var w=r.active||r.waiting||r.installing||{};` +
+	`return {scope:r.scope||'', script:w.scriptURL||''};})));},reject);})();}) : "[]")`
 
 // AG-NET-07: a registered Service Worker is same-origin (script and scope).
 func chkServiceWorker(ctx context.Context, c *CheckCtx) Outcome {
 	if c.Tools.Chrome == "" {
 		return inconclusive("no Chrome/Chromium for service-worker inspection")
 	}
-	out, err := browseEval(ctx, c.Tools.Chrome, c.Surface.URL, serviceWorkerJS, 3*time.Second, true)
+	out, err := browseEval(ctx, c.Tools.Chrome, c.Surface.URL, serviceWorkerJS, 0, true)
 	if err != nil {
 		return inconclusive("headless service-worker inspection failed: " + err.Error())
 	}
@@ -272,7 +427,7 @@ func chkServiceWorker(ctx context.Context, c *CheckCtx) Outcome {
 
 func serviceWorkerVerdict(self string, regs []swReg) Outcome {
 	if len(regs) == 0 {
-		return inconclusive("surface declares a service worker but none was registered at load")
+		return inconclusive("surface declares a service worker but none was registered within " + swWait.String() + " of load")
 	}
 	for _, r := range regs {
 		if r.Script != "" && hostOnly(r.Script) != self {

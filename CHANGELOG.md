@@ -6,6 +6,26 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (verdict-affecting)
+
+- **AG-GOV-06 passes only on a CSP block it observed.** The egress canary used to
+  PASS whenever no response to `example.com` arrived, so a surface with no CSP at
+  all passed on a runner without a route to the canary host. Each of the three
+  probes (fetch, image, sendBeacon) now needs proof from the browser: a
+  `Network.loadingFailed` with `blockedReason: csp`, or an enforced (not
+  report-only) CSP issue from the `Audits` domain, which is the only place Chrome
+  reports a blocked fetch or beacon. Any answered probe (including a redirect) is
+  FAIL: a CSP-blocked request never leaves the browser, so a reply from a captive
+  portal or proxy still proves the page let that channel out. A network error, a
+  report-only policy or no outcome within 10s is INCONCLUSIVE. The fixed 2s wait
+  after firing the probes is replaced by a wait on those events. (#16)
+- **AG-NET-07 waits for a deferred service-worker registration.** The check slept
+  a fixed 3s after load and read `getRegistrations()` once, so a site registering
+  its worker on `load` or when idle could come back INCONCLUSIVE on a slow Chrome
+  start. It now polls `getRegistrations()` from load until one appears, for up to
+  10s; none by then is INCONCLUSIVE as before. The same-origin verdict is
+  unchanged. (#18)
+
 ## [1.8.1] - 2026-11-04
 
 ### Fixed
