@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -393,16 +394,27 @@ type swReg struct {
 	Script string `json:"script"`
 }
 
-const serviceWorkerJS = `(navigator.serviceWorker ? navigator.serviceWorker.getRegistrations().then(function(rs){` +
-	`return JSON.stringify(rs.map(function(r){var w=r.active||r.waiting||r.installing||{};` +
-	`return {scope:r.scope||'', script:w.scriptURL||''};}));}) : "[]")`
+// swWait bounds how long after load AG-NET-07 waits for a registration. Sites
+// often register on load or when idle, which a cold Chrome can push past a few
+// seconds. The browse cap (and the per-check budget) still bounds the whole run.
+const swWait = 10 * time.Second
+
+// serviceWorkerJS polls getRegistrations() until one appears or swWait passes,
+// then resolves to the JSON array of registrations (empty if none, or if the
+// page has no service-worker API). A rejection propagates as an eval error.
+var serviceWorkerJS = `(navigator.serviceWorker ? new Promise(function(resolve, reject){` +
+	`var deadline=Date.now()+` + strconv.FormatInt(swWait.Milliseconds(), 10) + `;` +
+	`(function poll(){navigator.serviceWorker.getRegistrations().then(function(rs){` +
+	`if(rs.length===0&&Date.now()<deadline){setTimeout(poll,100);return;}` +
+	`resolve(JSON.stringify(rs.map(function(r){var w=r.active||r.waiting||r.installing||{};` +
+	`return {scope:r.scope||'', script:w.scriptURL||''};})));},reject);})();}) : "[]")`
 
 // AG-NET-07: a registered Service Worker is same-origin (script and scope).
 func chkServiceWorker(ctx context.Context, c *CheckCtx) Outcome {
 	if c.Tools.Chrome == "" {
 		return inconclusive("no Chrome/Chromium for service-worker inspection")
 	}
-	out, err := browseEval(ctx, c.Tools.Chrome, c.Surface.URL, serviceWorkerJS, 3*time.Second, true)
+	out, err := browseEval(ctx, c.Tools.Chrome, c.Surface.URL, serviceWorkerJS, 0, true)
 	if err != nil {
 		return inconclusive("headless service-worker inspection failed: " + err.Error())
 	}
@@ -415,7 +427,7 @@ func chkServiceWorker(ctx context.Context, c *CheckCtx) Outcome {
 
 func serviceWorkerVerdict(self string, regs []swReg) Outcome {
 	if len(regs) == 0 {
-		return inconclusive("surface declares a service worker but none was registered at load")
+		return inconclusive("surface declares a service worker but none was registered within " + swWait.String() + " of load")
 	}
 	for _, r := range regs {
 		if r.Script != "" && hostOnly(r.Script) != self {

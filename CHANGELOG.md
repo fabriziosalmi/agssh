@@ -19,6 +19,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   portal or proxy still proves the page let that channel out. A network error, a
   report-only policy or no outcome within 10s is INCONCLUSIVE. The fixed 2s wait
   after firing the probes is replaced by a wait on those events. (#16)
+- **AG-NET-07 waits for a deferred service-worker registration.** The check slept
+  a fixed 3s after load and read `getRegistrations()` once, so a site registering
+  its worker on `load` or when idle could come back INCONCLUSIVE on a slow Chrome
+  start. It now polls `getRegistrations()` from load until one appears, for up to
+  10s; none by then is INCONCLUSIVE as before. The same-origin verdict is
+  unchanged. (#18)
 
 ## [1.8.1] - 2026-11-04
 

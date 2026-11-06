@@ -2,11 +2,13 @@ package rules
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/chromedp/cdproto/audits"
 	"github.com/chromedp/cdproto/network"
@@ -180,6 +182,58 @@ func TestServiceWorkerVerdict(t *testing.T) {
 	crossScope := []swReg{{Scope: "https://other.test/", Script: "https://me.test/sw.js"}}
 	if serviceWorkerVerdict(self, crossScope).Status != Fail {
 		t.Error("cross-origin SW scope: want FAIL")
+	}
+}
+
+// swSite serves a page that registers /sw.js registerAfterMs after the load
+// event (never, if negative), as sites deferring registration off the critical
+// path do.
+func swSite(t *testing.T, registerAfterMs int) string {
+	t.Helper()
+	page := `<!doctype html><html><body>sw</body></html>`
+	if registerAfterMs >= 0 {
+		page = fmt.Sprintf(`<!doctype html><html><body>sw<script>
+window.addEventListener('load', function(){ setTimeout(function(){
+  navigator.serviceWorker.register('/sw.js');
+}, %d); });
+</script></body></html>`, registerAfterMs)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/sw.js" {
+			w.Header().Set("Content-Type", "text/javascript")
+			_, _ = w.Write([]byte(`self.addEventListener('install', function(){ self.skipWaiting(); });`))
+			return
+		}
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte(page))
+	}))
+	t.Cleanup(srv.Close)
+	return srv.URL
+}
+
+// TestServiceWorkerIntegration: a service worker registered after a delay past
+// load is still found (issue #18), and a declared one that never registers is
+// INCONCLUSIVE once the bounded wait runs out, not a hang.
+func TestServiceWorkerIntegration(t *testing.T) {
+	chrome := DiscoverTools().Chrome
+	if chrome == "" {
+		t.Skip("no Chrome/Chromium resolvable; skipping browser integration")
+	}
+	run := func(url string) Outcome {
+		return chkServiceWorker(context.Background(), &CheckCtx{
+			Surface: manifest.Surface{URL: url}, Tools: Toolbox{Chrome: chrome},
+		})
+	}
+	if out := run(swSite(t, 4000)); out.Status != Pass {
+		t.Errorf("SW registered 4s after load: got %s (%s), want PASS", out.Status, out.Err)
+	}
+	start := time.Now()
+	out := run(swSite(t, -1))
+	if out.Status != Inconclusive {
+		t.Errorf("SW never registered: got %s, want INCONCLUSIVE", out.Status)
+	}
+	if took := time.Since(start); took > 30*time.Second {
+		t.Errorf("SW never registered: took %s, want the bounded wait to end it", took)
 	}
 }
 
