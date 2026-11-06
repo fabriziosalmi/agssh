@@ -2,10 +2,15 @@ package rules
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/chromedp/cdproto/audits"
+	"github.com/chromedp/cdproto/network"
+	"github.com/chromedp/chromedp"
 
 	"github.com/fabriziosalmi/agssh/internal/manifest"
 )
@@ -56,15 +61,76 @@ func TestPreConsentVerdict(t *testing.T) {
 	}
 }
 
+// TestEgressCanaryVerdict: PASS only on a CSP block observed for every probe,
+// FAIL on any answered probe, INCONCLUSIVE on anything unproven (issue #16).
 func TestEgressCanaryVerdict(t *testing.T) {
-	if egressCanaryVerdict(true, true).Status != Fail {
-		t.Error("canary got a response (wall down): want FAIL")
+	blocked := canaryProbe{URL: canaryFetch, CSPBlocked: true}
+	answered := canaryProbe{URL: canaryPixel, Answered: true}
+	netErr := canaryProbe{URL: canaryBeacon, Failure: "net::ERR_NAME_NOT_RESOLVED"}
+	silent := canaryProbe{URL: canaryBeacon}
+	cases := []struct {
+		name   string
+		probes []canaryProbe
+		want   Status
+	}{
+		{"every probe CSP-blocked", []canaryProbe{blocked, blocked, blocked}, Pass},
+		{"one probe answered", []canaryProbe{blocked, answered, blocked}, Fail},
+		{"answered wins over an unproven probe", []canaryProbe{answered, netErr, silent}, Fail},
+		{"no outcome at all (absence is not proof)", []canaryProbe{silent, silent, silent}, Inconclusive},
+		{"network error, not a CSP block", []canaryProbe{netErr, netErr, netErr}, Inconclusive},
+		{"two blocked, one network error", []canaryProbe{blocked, blocked, netErr}, Inconclusive},
+		{"two blocked, one never settled", []canaryProbe{blocked, blocked, silent}, Inconclusive},
+		{"non-CSP block reason", []canaryProbe{blocked, blocked, {URL: canaryBeacon, Failure: "inspector"}}, Inconclusive},
+		{"no probes", nil, Inconclusive},
 	}
-	if egressCanaryVerdict(true, false).Status != Pass {
-		t.Error("canary blocked: want PASS")
+	for _, tc := range cases {
+		if got := egressCanaryVerdict(tc.probes).Status; got != tc.want {
+			t.Errorf("%s: got %s, want %s", tc.name, got, tc.want)
+		}
 	}
-	if egressCanaryVerdict(false, false).Status != Pass {
-		t.Error("canary never left: want PASS")
+}
+
+// TestCanaryObservation feeds synthesized CDP events through netObs: a CSP block
+// is proven by loadingFailed{blockedReason: csp} or by an enforced CSP issue, a
+// report-only issue proves nothing, and a redirect counts as an answer.
+func TestCanaryObservation(t *testing.T) {
+	cspIssue := func(u string, reportOnly bool) *audits.EventIssueAdded {
+		return &audits.EventIssueAdded{Issue: &audits.InspectorIssue{
+			Code: audits.InspectorIssueCodeContentSecurityPolicyIssue,
+			Details: &audits.InspectorIssueDetails{ContentSecurityPolicyIssueDetails: &audits.ContentSecurityPolicyIssueDetails{
+				BlockedURL: u, ViolatedDirective: "connect-src", IsReportOnly: reportOnly}}}}
+	}
+	req := func(id, u string) *network.EventRequestWillBeSent {
+		return &network.EventRequestWillBeSent{RequestID: network.RequestID(id), Request: &network.Request{URL: u}}
+	}
+
+	obs := newObs()
+	obs.on(req("1", canaryPixel))
+	obs.on(&network.EventLoadingFailed{RequestID: "1", BlockedReason: network.BlockedReasonCsp})
+	obs.on(cspIssue(canaryFetch, false))
+	obs.on(cspIssue(canaryBeacon, false))
+	if out := egressCanaryVerdict(obs.canaryProbes()); out.Status != Pass {
+		t.Errorf("every probe blocked (network csp + enforced issues): got %s (%s)", out.Status, out.Err)
+	}
+
+	obs = newObs()
+	obs.on(req("1", canaryPixel))
+	obs.on(&network.EventLoadingFailed{RequestID: "1", BlockedReason: network.BlockedReasonCsp})
+	obs.on(cspIssue(canaryFetch, false))
+	obs.on(cspIssue(canaryBeacon, true)) // report-only: the probe still goes out
+	if out := egressCanaryVerdict(obs.canaryProbes()); out.Status != Inconclusive {
+		t.Errorf("report-only issue for the beacon: got %s, want INCONCLUSIVE", out.Status)
+	}
+
+	obs = newObs()
+	obs.on(cspIssue(canaryFetch, false))
+	obs.on(cspIssue(canaryBeacon, false))
+	obs.on(req("2", canaryPixel))
+	obs.on(&network.EventRequestWillBeSent{RequestID: "2", Request: &network.Request{URL: "http://portal.test/login"},
+		RedirectResponse: &network.Response{URL: canaryPixel, Status: 302}})
+	obs.on(&network.EventLoadingFailed{RequestID: "2", BlockedReason: network.BlockedReasonCsp})
+	if out := egressCanaryVerdict(obs.canaryProbes()); out.Status != Fail {
+		t.Errorf("pixel answered with a redirect, then its target CSP-blocked: got %s, want FAIL", out.Status)
 	}
 }
 
@@ -128,6 +194,76 @@ func TestClientStorageIntegration(t *testing.T) {
 	})
 	if allowed.Status != Pass {
 		t.Errorf("allow-listed localStorage key: got %s (%s), want PASS", allowed.Status, allowed.Err)
+	}
+}
+
+// withCanaryNetwork points the headless browser's resolver for the canary host at
+// rule (e.g. a local TLS server standing in for a captive portal, or ~NOTFOUND for
+// an egress-less runner) for the duration of the test.
+func withCanaryNetwork(t *testing.T, rule string) {
+	t.Helper()
+	prev := extraBrowserFlags
+	extraBrowserFlags = []chromedp.ExecAllocatorOption{
+		chromedp.Flag("host-resolver-rules", rule),
+		chromedp.Flag("ignore-certificate-errors", true),
+	}
+	t.Cleanup(func() { extraBrowserFlags = prev })
+}
+
+// cspPage serves a blank page under the given CSP header (none if hdr is "").
+func cspPage(t *testing.T, hdr, policy string) string {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if hdr != "" {
+			w.Header().Set(hdr, policy)
+		}
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte(`<!doctype html><html><body>surface</body></html>`))
+	}))
+	t.Cleanup(srv.Close)
+	return srv.URL
+}
+
+// TestEgressCanaryIntegration drives the canary in a real headless browser with
+// the canary host resolved to a local server (an environment that answers it,
+// like a captive portal or transparent proxy) or to nothing (a runner with no
+// egress). PASS must come from an observed CSP block, never from the absence of
+// a response (issue #16).
+func TestEgressCanaryIntegration(t *testing.T) {
+	chrome := DiscoverTools().Chrome
+	if chrome == "" {
+		t.Skip("no Chrome/Chromium resolvable; skipping browser integration")
+	}
+	portal := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("captive portal"))
+	}))
+	defer portal.Close()
+	_, port, _ := net.SplitHostPort(portal.Listener.Addr().String())
+	answers := "MAP " + canaryHost + " 127.0.0.1:" + port
+	unreachable := "MAP " + canaryHost + " ~NOTFOUND"
+	const csp, ro = "Content-Security-Policy", "Content-Security-Policy-Report-Only"
+
+	cases := []struct {
+		name, network, hdr, policy string
+		want                       Status
+	}{
+		{"strict CSP, environment answers the canary", answers, csp, "default-src 'none'", Pass},
+		{"strict CSP, canary unreachable", unreachable, csp, "default-src 'none'", Pass},
+		{"no CSP, environment answers the canary", answers, "", "", Fail},
+		{"img-src admits the canary host", answers, csp, "default-src 'none'; img-src https://" + canaryHost, Fail},
+		{"no CSP, canary unreachable", unreachable, "", "", Inconclusive},
+		{"report-only CSP, canary unreachable", unreachable, ro, "default-src 'none'", Inconclusive},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			withCanaryNetwork(t, tc.network)
+			out := chkEgressCanary(context.Background(), &CheckCtx{
+				Surface: manifest.Surface{URL: cspPage(t, tc.hdr, tc.policy)}, Tools: Toolbox{Chrome: chrome},
+			})
+			if out.Status != tc.want {
+				t.Errorf("got %s (observed %q, err %q), want %s", out.Status, out.Evidence.Observed, out.Err, tc.want)
+			}
+		})
 	}
 }
 
