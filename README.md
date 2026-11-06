@@ -32,6 +32,7 @@ agssh scan -json https://your-surface.example/ | jq '.score.pct'   # machine-rea
 straight into a shell script or CI step. Source-plane rules (secrets, vulnerable
 deps, SBOM, CI) stay `INCONCLUSIVE` unless you add `-repo`, `-dist`, `-workflows`.
 For a declared, versioned manifest use `agssh -config .airgap.yml` instead (below).
+`agssh rule AG-NET-05` prints one rule's full text (why, check, fix, tool) offline.
 No Go? Every [release](https://github.com/fabriziosalmi/agssh/releases) ships prebuilt
 `agssh` and `agssh-mcp` binaries, or use the Action or the `ghcr.io/fabriziosalmi/agssh` image:
 `docker run --rm ghcr.io/fabriziosalmi/agssh scan https://your-surface.example/`.

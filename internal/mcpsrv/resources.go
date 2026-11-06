@@ -203,46 +203,9 @@ func readRule(_ context.Context, req *mcp.ReadResourceRequest) (res *mcp.ReadRes
 	return textResult(uri, renderRule(r)), nil
 }
 
-func renderRule(r rules.Rule) string {
-	sr, fam, hasText := rules.SpecFor(r.ID)
-	m := levelModes(r.ID)
-
-	var b strings.Builder
-	fmt.Fprintf(&b, "# %s: %s\n\n", r.ID, r.Title)
-	b.WriteString("| Field | Value |\n|---|---|\n")
-	fmt.Fprintf(&b, "| Standard | AGSSH-STD-001 %s |\n", rules.StandardVersion)
-	if hasText {
-		fmt.Fprintf(&b, "| Family | %s (%s %s) |\n", r.Family, fam.Section, mdCell(fam.Title))
-	} else {
-		fmt.Fprintf(&b, "| Family | %s |\n", r.Family)
-	}
-	fmt.Fprintf(&b, "| Obligation | %s |\n", r.Obligation)
-	fmt.Fprintf(&b, "| Severity | %s (weight %d) |\n", r.Severity, r.Severity.Weight())
-	fmt.Fprintf(&b, "| Profile | %s (lowest cumulative profile that includes the rule) |\n", r.Profile)
-	fmt.Fprintf(&b, "| Levels | L0 %s, L1 %s, L2 %s |\n", m[0], m[1], m[2])
-	fmt.Fprintf(&b, "| Verification plane | %s |\n", r.Plane)
-	if hasText {
-		fmt.Fprintf(&b, "| Applies (standard) | %s |\n", mdCell(sr.Applies))
-		fmt.Fprintf(&b, "| Check type (standard) | %s |\n", mdCell(sr.CheckType))
-		if sr.Title != r.Title {
-			fmt.Fprintf(&b, "| Title in the standard | %s |\n", mdCell(sr.Title))
-		}
-	}
-
-	if !hasText {
-		b.WriteString("\n## Normative text\n\nThe repository holds no rationale, check or remediation text " +
-			"for this rule. Do not infer a remediation from this resource.\n")
-		return b.String()
-	}
-	b.WriteString("\nThe sections below are the standard's own text for this rule.\n")
-	fmt.Fprintf(&b, "\n## Rationale (why)\n\n%s\n", sr.Why)
-	fmt.Fprintf(&b, "\n## Check (the predicate that must hold)\n\n```text\n%s\n```\n", sr.Check)
-	fmt.Fprintf(&b, "\n## Remediation (how to satisfy)\n\n%s\n", sr.Fix)
-	if strings.TrimSpace(sr.Tool) != "" {
-		fmt.Fprintf(&b, "\n## Tooling\n\n%s\n", sr.Tool)
-	}
-	return b.String()
-}
+// renderRule is the rule resource's body: the same Markdown `agssh rule <id>`
+// prints, so the CLI, the editor extension and the MCP client read one text.
+func renderRule(r rules.Rule) string { return rules.RuleMarkdown(r) }
 
 // levelModes returns the rule's mode at L0, L1, L2.
 func levelModes(id string) [3]string {
